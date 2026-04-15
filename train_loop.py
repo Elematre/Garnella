@@ -10,18 +10,20 @@ def train_loop(train_data, test_data, combinations):
     results = []
 
     for vectorizer_func, model_func in combinations:
-        # 1) Vectorize -> get embeddings
-        ## TODO: add other workflow if we want to use pretrained word embeddings, these don't take same arguments
+        # 1) Vectorize -> returns embeddings for input sentences
+        # TODO: add seperate if statement for glove, if we want to use different paths or dimensions
         X_train, X_val = vectorizer_func(train_data["sentence"], test_data["sentence"])
         # extract ground truth labels
         Y_train, Y_val = train_data["label"], test_data["label"]
 
+        print("Done with embeddings!")
+
         # 2) Train
-        # instantiate model, so it is a clean state
+        # instantiate model, so it is in a clean state
         model = model_func()
         model.fit(X_train, Y_train)
 
-        # 3) Evaluate
+        # 3) Evaluate with MAE accuracy
         Y_train_pred = model.predict(X_train)
         Y_val_pred = model.predict(X_val)
         score_train, mae_train, accuracy_train, score_val, mae_val, accuracy_val = evaluateMAE(Y_train_pred, Y_train, Y_val_pred, Y_val)
