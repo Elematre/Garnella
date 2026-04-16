@@ -33,11 +33,10 @@ def get_tfidf_embeddings(X_train, X_test):
 
 # TODO: maybe use multilingual pre-trained embeddings
 def get_multilingual_embeddings(X_train, X_val):
-    model = SentenceTransformer("paraphrase-multilingual-MiniLM-L12-v2")
-    X_train_emb = model.encode(list(X_train))
-    X_val_emb   = model.encode(list(X_val))
+    model = SentenceTransformer("paraphrase-multilingual-MiniLM-L12-v2", device="cpu")
+    X_train_emb = model.encode(list(X_train), batch_size=256, show_progress_bar=True)
+    X_val_emb = model.encode(list(X_val), batch_size=256, show_progress_bar=True)
     return X_train_emb, X_val_emb
-
 
 
 # NOTE: tried GloVe but realised it is only for English,so doesn't work for our mix here
