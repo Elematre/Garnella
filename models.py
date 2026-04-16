@@ -6,7 +6,7 @@ from sklearn.neural_network import MLPClassifier
 ####### BASELINES ########
 
 def get_logistic_regression():
-    return LogisticRegression(C=1.0, max_iter=100)
+    return LogisticRegression(C=1.0, max_iter=1000)
 
 def get_linear_svm():
     return LinearSVC(C=1.0, max_iter=1000)
