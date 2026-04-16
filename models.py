@@ -40,7 +40,7 @@ def get_random_forest():
 def get_xgboost():
     return xgb.XGBClassifier(
         n_estimators=300, max_depth=6, learning_rate=0.1,
-        tree_method="gpu_hist", n_jobs=-1, random_state=1
+        device = "cuda", n_jobs=-1, random_state=1
     )
 
 def get_knn():

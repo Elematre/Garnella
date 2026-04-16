@@ -70,7 +70,7 @@ from tqdm import tqdm
 from transformers import AutoTokenizer, AutoModel
 import os
 
-def get_qwen_embeddings(train_texts, val_texts, model_name="Qwen/Qwen2.5-1.5B", batch_size=64, cache_dir="./embedding_cache", save=True):
+def get_gemma_embeddings(train_texts, val_texts, model_name="google/embeddinggemma-300m", batch_size=64, cache_dir="./embedding_cache", save=True):
     if save:
         os.makedirs(cache_dir, exist_ok=True)
         train_path = os.path.join(cache_dir, f"{model_name.replace('/', '_')}_train.npy")
@@ -81,7 +81,7 @@ def get_qwen_embeddings(train_texts, val_texts, model_name="Qwen/Qwen2.5-1.5B", 
             return np.load(train_path), np.load(val_path)
 
     tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
-    model = AutoModel.from_pretrained(model_name, torch_dtype=torch.float16, trust_remote_code=True).cuda().eval()
+    model = AutoModel.from_pretrained(model_name, torch_dtype=torch.bfloat16, trust_remote_code=True).cuda().eval()
 
     def encode(texts):
         all_embeddings = []
@@ -90,7 +90,45 @@ def get_qwen_embeddings(train_texts, val_texts, model_name="Qwen/Qwen2.5-1.5B", 
             inputs = tokenizer(batch, padding=True, truncation=True, max_length=128, return_tensors="pt").to("cuda")
             with torch.no_grad():
                 outputs = model(**inputs)
-            mask = inputs["attention_mask"].unsqueeze(-1).half()
+            mask = inputs["attention_mask"].unsqueeze(-1).bfloat16()  # not .half()
+            embeddings = (outputs.last_hidden_state * mask).sum(dim=1) / mask.sum(dim=1)
+            all_embeddings.append(embeddings.cpu().numpy())
+        return np.vstack(all_embeddings)
+
+    train_emb = encode(list(train_texts))
+    val_emb = encode(list(val_texts))
+
+    if save:
+        np.save(train_path, train_emb)
+        np.save(val_path, val_emb)
+        print(f"Saved embeddings to {cache_dir}")
+
+    del model
+    torch.cuda.empty_cache()
+
+    return train_emb, val_emb
+
+def get_qwen_embeddings(train_texts, val_texts, model_name="Qwen/Qwen3-Embedding-4B", batch_size=16, cache_dir="./embedding_cache", save=True):
+    if save:
+        os.makedirs(cache_dir, exist_ok=True)
+        train_path = os.path.join(cache_dir, f"{model_name.replace('/', '_')}_train.npy")
+        val_path = os.path.join(cache_dir, f"{model_name.replace('/', '_')}_val.npy")
+
+        if os.path.exists(train_path) and os.path.exists(val_path):
+            print(f"Loading saved embeddings from {cache_dir}")
+            return np.load(train_path), np.load(val_path)
+
+    tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
+    model = AutoModel.from_pretrained(model_name, torch_dtype=torch.bfloat16, trust_remote_code=True).cuda().eval()
+
+    def encode(texts):
+        all_embeddings = []
+        for i in tqdm(range(0, len(texts), batch_size), desc="Encoding"):
+            batch = texts[i:i+batch_size]
+            inputs = tokenizer(batch, padding=True, truncation=True, max_length=128, return_tensors="pt").to("cuda")
+            with torch.no_grad():
+                outputs = model(**inputs)
+            mask = inputs["attention_mask"].unsqueeze(-1).bfloat16()  # not .half()
             embeddings = (outputs.last_hidden_state * mask).sum(dim=1) / mask.sum(dim=1)
             all_embeddings.append(embeddings.cpu().numpy())
         return np.vstack(all_embeddings)
