@@ -109,7 +109,7 @@ def get_gemma_embeddings(train_texts, val_texts, model_name="google/embeddinggem
 
     return train_emb, val_emb
 
-def get_qwen_embeddings(train_texts, val_texts, model_name="Qwen/Qwen3-Embedding-4B", batch_size=16, cache_dir="./embedding_cache", save=True):
+def get_qwen_embeddings(train_texts, val_texts, model_name="Qwen/Qwen3-Embedding-4B", batch_size=64, cache_dir="./embedding_cache", save=True):
     if save:
         os.makedirs(cache_dir, exist_ok=True)
         train_path = os.path.join(cache_dir, f"{model_name.replace('/', '_')}_train.npy")
