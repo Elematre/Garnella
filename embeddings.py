@@ -70,7 +70,7 @@ from tqdm import tqdm
 from transformers import AutoTokenizer, AutoModel
 import os
 
-def get_gemma_embeddings(train_texts, val_texts, model_name="google/embeddinggemma-300m", batch_size=64, cache_dir="./embedding_cache", save=True):
+def get_gemma_embeddings(train_texts, val_texts, model_name="google/embeddinggemma-300m", batch_size=128, cache_dir="./embedding_cache", save=True):
     if save:
         os.makedirs(cache_dir, exist_ok=True)
         train_path = os.path.join(cache_dir, f"{model_name.replace('/', '_')}_train.npy")
@@ -92,7 +92,7 @@ def get_gemma_embeddings(train_texts, val_texts, model_name="google/embeddinggem
                 outputs = model(**inputs)
             mask = inputs["attention_mask"].unsqueeze(-1).bfloat16()  # not .half()
             embeddings = (outputs.last_hidden_state * mask).sum(dim=1) / mask.sum(dim=1)
-            all_embeddings.append(embeddings.cpu().numpy())
+            all_embeddings.append(embeddings.cpu().float().numpy())
         return np.vstack(all_embeddings)
 
     train_emb = encode(list(train_texts))
@@ -130,7 +130,7 @@ def get_qwen_embeddings(train_texts, val_texts, model_name="Qwen/Qwen3-Embedding
                 outputs = model(**inputs)
             mask = inputs["attention_mask"].unsqueeze(-1).bfloat16()  # not .half()
             embeddings = (outputs.last_hidden_state * mask).sum(dim=1) / mask.sum(dim=1)
-            all_embeddings.append(embeddings.cpu().numpy())
+            all_embeddings.append(embeddings.cpu().float().numpy())
         return np.vstack(all_embeddings)
 
     train_emb = encode(list(train_texts))
