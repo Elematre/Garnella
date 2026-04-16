@@ -82,6 +82,7 @@ def get_gemma_embeddings(train_texts, val_texts, model_name="google/embeddinggem
 
     tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
     model = AutoModel.from_pretrained(model_name, torch_dtype=torch.bfloat16, trust_remote_code=True).cuda().eval()
+    model = torch.compile(model)
 
     def encode(texts):
         all_embeddings = []
@@ -120,6 +121,7 @@ def get_qwen_embeddings(train_texts, val_texts, model_name="Qwen/Qwen3-Embedding
 
     tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
     model = AutoModel.from_pretrained(model_name, torch_dtype=torch.bfloat16, trust_remote_code=True).cuda().eval()
+    model = torch.compile(model)
 
     def encode(texts):
         all_embeddings = []
