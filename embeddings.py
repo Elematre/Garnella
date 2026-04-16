@@ -64,3 +64,33 @@ def get_multilingual_embeddings(X_train, X_val):
 #     X_train_emb = np.array([embed_sentence(s, glove_dict, dim) for s in X_train])
 #     X_val_emb   = np.array([embed_sentence(s, glove_dict, dim) for s in X_val])
 #     return X_train_emb, X_val_emb
+
+
+import torch
+import numpy as np
+from tqdm import tqdm
+from transformers import AutoTokenizer, AutoModel
+
+def get_qwen_embeddings(train_texts, val_texts, model_name="Qwen/Qwen2.5-1.5B", batch_size=128):
+    tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
+    model = AutoModel.from_pretrained(model_name, torch_dtype=torch.float16, trust_remote_code=True).cuda().eval()
+
+    def encode(texts):
+        all_embeddings = []
+        for i in tqdm(range(0, len(texts), batch_size), desc="Encoding"):
+            batch = texts[i:i+batch_size]
+            inputs = tokenizer(batch, padding=True, truncation=True, max_length=128, return_tensors="pt").to("cuda")
+            with torch.no_grad():
+                outputs = model(**inputs)
+            mask = inputs["attention_mask"].unsqueeze(-1).half()
+            embeddings = (outputs.last_hidden_state * mask).sum(dim=1) / mask.sum(dim=1)
+            all_embeddings.append(embeddings.cpu().numpy())
+        return np.vstack(all_embeddings)
+
+    train_emb = encode(list(train_texts))
+    val_emb = encode(list(val_texts))
+
+    del model
+    torch.cuda.empty_cache()
+
+    return train_emb, val_emb
