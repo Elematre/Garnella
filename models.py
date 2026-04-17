@@ -42,6 +42,17 @@ def get_xgboost():
         n_estimators=300, max_depth=6, learning_rate=0.1,
         device = "cuda", n_jobs=-1, random_state=1
     )
+from sklearn.model_selection import GridSearchCV
 
+def get_xgboost_tuned():
+    param_grid = {
+        "max_depth": [3, 4, 6],
+        "learning_rate": [0.05, 0.1],
+        "subsample": [0.8, 1.0],
+    }
+    return GridSearchCV(
+        xgb.XGBClassifier(n_estimators=300, device="cuda", n_jobs=-1, random_state=1),
+        param_grid, cv=3, scoring="neg_mean_absolute_error", n_jobs=1
+    )
 def get_knn():
     return KNeighborsClassifier(n_neighbors=15, n_jobs=-1)
