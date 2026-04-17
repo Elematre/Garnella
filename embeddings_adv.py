@@ -120,7 +120,7 @@ def finetune_gemma(train_df, text_col="sentence", label_col="label",
         bf16=True,
         logging_steps=50,
         save_strategy="epoch",
-        dataloader_num_workers=4,
+        dataloader_num_workers=0,
         report_to="none",
     )
 
