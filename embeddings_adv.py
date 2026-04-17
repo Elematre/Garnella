@@ -81,6 +81,26 @@ def get_bge_m3_embeddings(train_texts, val_texts):
     )
 
 
+def get_gemma_embeddings_seq128(train_texts, val_texts):
+    return _encode_with(
+        "google/embeddinggemma-300m", "gemma_seq128",
+        train_texts, val_texts, prompt_name="Classification",
+        max_seq_length=128,
+    )
+
+def get_gte_multilingual_embeddings_seq128(train_texts, val_texts):
+    return _encode_with(
+        "Alibaba-NLP/gte-multilingual-base", "gte_multilingual_seq128",
+        train_texts, val_texts, trust_remote_code=True,
+        max_seq_length=128,
+    )
+
+def get_bge_m3_embeddings_seq128(train_texts, val_texts):
+    return _encode_with(
+        "BAAI/bge-m3", "bge_m3_seq128",
+        train_texts, val_texts,
+        max_seq_length=128,
+    )
 # =============================================================================
 # 3. FINE-TUNING GEMMA (ordinal-aware via CoSENT)
 # =============================================================================
