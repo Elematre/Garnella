@@ -4,6 +4,7 @@ import torch
 from sentence_transformers import SentenceTransformer, losses
 from sentence_transformers.training_args import SentenceTransformerTrainingArguments
 from sentence_transformers.trainer import SentenceTransformerTrainer
+from sentence_transformers.evaluation import EmbeddingSimilarityEvaluator, SimilarityFunction
 from datasets import Dataset
 from peft import LoraConfig, get_peft_model
 
@@ -28,13 +29,13 @@ def _load_cache(name):
 
 def _encode_with(model_name, cache_key, train_texts, val_texts,
                  prompt_name=None, trust_remote_code=False,
-                 max_seq_length=128, batch_size=128):
+                 max_seq_length=64, batch_size=128):
     cached = _load_cache(cache_key)
     if cached is not None:
         return cached
 
     model = SentenceTransformer(
-        model_name, device="cuda", trust_remote_code=trust_remote_code
+        model_name, device="cuda", trust_remote_code=trust_remote_code,
     )
     model.max_seq_length = max_seq_length
 
@@ -47,6 +48,7 @@ def _encode_with(model_name, cache_key, train_texts, val_texts,
 
     del model
     torch.cuda.empty_cache()
+
     _save_cache(cache_key, train_emb, val_emb)
     return train_emb, val_emb
 
@@ -80,19 +82,49 @@ def get_bge_m3_embeddings(train_texts, val_texts):
 
 
 # =============================================================================
-# 3. FINE-TUNING GEMMA
+# 3. FINE-TUNING GEMMA (ordinal-aware via CoSENT)
 # =============================================================================
-# I used LoRA to speed up finetuning and used 
-def finetune_gemma(train_df, text_col="sentence", label_col="label",
+
+def _build_cosent_pairs(texts, labels, n_pairs=150_000, seed=1):
+    """
+    Build (sentence1, sentence2, score) triples where score reflects ordinal
+    closeness: 1.0 for same class, decaying linearly with |label_i - label_j|.
+    CoSENT only uses the *ranking* of scores within a batch, so the exact
+    scale doesn't matter — only that closer labels → higher score.
+    """
+    rng = np.random.default_rng(seed)
+    texts = np.asarray(texts)
+    labels = np.asarray(labels, dtype=float)
+    n = len(texts)
+
+    label_range = labels.max() - labels.min()
+    if label_range == 0:
+        label_range = 1.0
+
+    i = rng.integers(0, n, size=n_pairs)
+    j = rng.integers(0, n, size=n_pairs)
+    mask = i != j
+    i, j = i[mask], j[mask]
+
+    scores = 1.0 - np.abs(labels[i] - labels[j]) / label_range
+    return {
+        "sentence1": texts[i].tolist(),
+        "sentence2": texts[j].tolist(),
+        "score": scores.astype(np.float32).tolist(),
+    }
+
+
+def finetune_gemma(train_df, val_df=None,
+                   text_col="sentence", label_col="label",
                    output_dir="./gemma-finetuned",
-                   epochs=2, batch_size=128, lr=2e-4,
-                   max_seq_length=128):
+                   epochs=3, batch_size=128, lr=2e-4,
+                   max_seq_length=64, n_train_pairs=150_000,
+                   n_eval_pairs=5_000):
     os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 
     model = SentenceTransformer("google/embeddinggemma-300m", device="cuda")
     model.max_seq_length = max_seq_length
 
-    # LoRA on attention projections
     lora_config = LoraConfig(
         r=16,
         lora_alpha=32,
@@ -102,15 +134,31 @@ def finetune_gemma(train_df, text_col="sentence", label_col="label",
     )
     peft_model = get_peft_model(model[0].auto_model, lora_config)
     peft_model.print_trainable_parameters()
-    #peft_model.gradient_checkpointing_enable()
     model[0].auto_model = peft_model
 
-    train_dataset = Dataset.from_dict({
-        "sentence": list(train_df[text_col]),
-        "label": list(train_df[label_col].astype(int)),
-    })
+    train_pairs = _build_cosent_pairs(
+        train_df[text_col].tolist(),
+        train_df[label_col].astype(float).tolist(),
+        n_pairs=n_train_pairs, seed=1,
+    )
+    train_dataset = Dataset.from_dict(train_pairs)
 
-    loss = losses.BatchAllTripletLoss(model, margin=0.5)
+    evaluator = None
+    if val_df is not None:
+        eval_pairs = _build_cosent_pairs(
+            val_df[text_col].tolist(),
+            val_df[label_col].astype(float).tolist(),
+            n_pairs=n_eval_pairs, seed=2,
+        )
+        evaluator = EmbeddingSimilarityEvaluator(
+            sentences1=eval_pairs["sentence1"],
+            sentences2=eval_pairs["sentence2"],
+            scores=eval_pairs["score"],
+            main_similarity=SimilarityFunction.COSINE,
+            name="ordinal-val",
+        )
+
+    loss = losses.CoSENTLoss(model)
 
     args = SentenceTransformerTrainingArguments(
         output_dir=output_dir,
@@ -120,28 +168,39 @@ def finetune_gemma(train_df, text_col="sentence", label_col="label",
         warmup_ratio=0.1,
         bf16=True,
         logging_steps=50,
+        eval_strategy="epoch" if evaluator is not None else "no",
         save_strategy="epoch",
+        load_best_model_at_end=evaluator is not None,
+        metric_for_best_model="eval_ordinal-val_spearman_cosine",
+        greater_is_better=True,
+        save_total_limit=2,
         dataloader_num_workers=0,
         report_to="none",
     )
 
     trainer = SentenceTransformerTrainer(
-        model=model, args=args, train_dataset=train_dataset, loss=loss,
+        model=model, args=args,
+        train_dataset=train_dataset,
+        evaluator=evaluator,
+        loss=loss,
     )
     trainer.train()
 
-    # Merge LoRA weights so the saved model is a standalone ST model
-    # Grab the PEFT-wrapped model from the trainer (the SentenceTransformer
-    # wrapper may have unwrapped auto_model along the way)
     trainer_auto_model = trainer.model[0].auto_model
     if hasattr(trainer_auto_model, "merge_and_unload"):
         model[0].auto_model = trainer_auto_model.merge_and_unload()
     else:
         model[0].auto_model = trainer_auto_model
-    model.save_pretrained(output_dir)
+
+    model.save(output_dir)
 
     del model
     torch.cuda.empty_cache()
+    reloaded = SentenceTransformer(output_dir, device="cuda")
+    _ = reloaded.encode(["sanity check"], show_progress_bar=False)
+    del reloaded
+    torch.cuda.empty_cache()
+    print(f"Saved and verified fine-tuned model at {output_dir}")
 
 
 def get_gemma_finetuned_embeddings(train_texts, val_texts,

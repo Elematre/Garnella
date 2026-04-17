@@ -2,47 +2,58 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.svm import LinearSVC
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.neural_network import MLPClassifier
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.model_selection import GridSearchCV
+import xgboost as xgb
+
 
 ####### BASELINES ########
 
 def get_logistic_regression():
-    return LogisticRegression(C=1.0, max_iter=1000)
+    return LogisticRegression(C=1.0, max_iter=1000, n_jobs=-1)
+
 
 def get_linear_svm():
-    return LinearSVC(C=1.0, max_iter=1000)
-
-# NOTE: not sure if needed? would need low-dimensional dense embeddings first
-# def get_random_forest():
-#     # some start parameters, so it doesn't take too long to train, can be tuned later
-#     return RandomForestClassifier(n_estimators=100, n_jobs=-1)
-
-# # needed? 
-# def get_mlp():
-#     # some start parameters, can be tuned later
-#     return MLPClassifier(random_state=1,max_iter=300)
-
-# 1D CNN
+    return LinearSVC(C=1.0, max_iter=2000)
 
 
-
-
-# more stuff
-from sklearn.neighbors import KNeighborsClassifier
-import xgboost as xgb
+def get_knn():
+    return KNeighborsClassifier(n_neighbors=15, n_jobs=-1)
 
 
 def get_mlp():
-    return MLPClassifier(hidden_layer_sizes=(256,), max_iter=300, random_state=1)
+    # fixes the 98%/54% overfit: smaller net, more L2, early stopping
+    return MLPClassifier(
+        hidden_layer_sizes=(128,),
+        alpha=1e-2,
+        early_stopping=True,
+        validation_fraction=0.1,
+        n_iter_no_change=10,
+        max_iter=300,
+        random_state=1,
+    )
+
 
 def get_random_forest():
     return RandomForestClassifier(n_estimators=300, n_jobs=-1, random_state=1)
 
+
 def get_xgboost():
     return xgb.XGBClassifier(
         n_estimators=300, max_depth=6, learning_rate=0.1,
-        device = "cuda", n_jobs=-1, random_state=1
+        device="cuda", n_jobs=-1, random_state=1,
     )
-from sklearn.model_selection import GridSearchCV
+
+
+####### TUNED VARIANTS ########
+
+def get_logistic_regression_tuned():
+    param_grid = {"C": [0.01, 0.1, 1.0, 10.0]}
+    return GridSearchCV(
+        LogisticRegression(max_iter=2000, n_jobs=-1),
+        param_grid, cv=3, scoring="neg_mean_absolute_error", n_jobs=-1,
+    )
+
 
 def get_xgboost_tuned():
     param_grid = {
@@ -52,7 +63,5 @@ def get_xgboost_tuned():
     }
     return GridSearchCV(
         xgb.XGBClassifier(n_estimators=300, device="cuda", n_jobs=-1, random_state=1),
-        param_grid, cv=3, scoring="neg_mean_absolute_error", n_jobs=1
+        param_grid, cv=3, scoring="neg_mean_absolute_error", n_jobs=1,
     )
-def get_knn():
-    return KNeighborsClassifier(n_neighbors=15, n_jobs=-1)
