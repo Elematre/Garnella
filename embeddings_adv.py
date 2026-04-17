@@ -91,16 +91,11 @@ def finetune_gemma(train_df, text_col="sentence", label_col="label",
     model = SentenceTransformer("google/embeddinggemma-300m", device="cuda")
     model.max_seq_length = max_seq_length
 
-    # >>> ADD THIS BLOCK <
-    for name, _ in model[0].auto_model.named_modules():
-        if any(k in name for k in ["proj", "attn", "mlp"]):
-            print(name)
-
     # LoRA on attention projections
     lora_config = LoraConfig(
         r=16,
         lora_alpha=32,
-        target_modules=["q_proj", "k_proj", "v_proj", "o_proj"],
+        target_modules="all-linear",
         lora_dropout=0.1,
         bias="none",
     )
