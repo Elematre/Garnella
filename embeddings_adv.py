@@ -30,8 +30,8 @@ def get_gemma_embeddings_v2(train_texts, val_texts):
     if cached: return cached
 
     model = SentenceTransformer("google/embeddinggemma-300m", device="cuda")
-    train_emb = model.encode(list(train_texts), batch_size=256, prompt_name="Classification", show_progress_bar=True)
-    val_emb = model.encode(list(val_texts), batch_size=256, prompt_name="Classification", show_progress_bar=True)
+    train_emb = model.encode(list(train_texts), batch_size=128, prompt_name="Classification", show_progress_bar=True)
+    val_emb = model.encode(list(val_texts), batch_size=128, prompt_name="Classification", show_progress_bar=True)
     del model; torch.cuda.empty_cache()
 
     _save_cache("gemma_v2", train_emb, val_emb)
@@ -49,8 +49,8 @@ def get_gte_multilingual_embeddings(train_texts, val_texts):
     if cached: return cached
 
     model = SentenceTransformer("Alibaba-NLP/gte-multilingual-base", trust_remote_code=True, device="cuda")
-    train_emb = model.encode(list(train_texts), batch_size=256, show_progress_bar=True)
-    val_emb = model.encode(list(val_texts), batch_size=256, show_progress_bar=True)
+    train_emb = model.encode(list(train_texts), batch_size=128, show_progress_bar=True)
+    val_emb = model.encode(list(val_texts), batch_size=128, show_progress_bar=True)
     del model; torch.cuda.empty_cache()
 
     _save_cache("gte_multilingual", train_emb, val_emb)
@@ -62,8 +62,8 @@ def get_bge_m3_embeddings(train_texts, val_texts):
     if cached: return cached
 
     model = SentenceTransformer("BAAI/bge-m3", device="cuda")
-    train_emb = model.encode(list(train_texts), batch_size=256, show_progress_bar=True)
-    val_emb = model.encode(list(val_texts), batch_size=256, show_progress_bar=True)
+    train_emb = model.encode(list(train_texts), batch_size=128, show_progress_bar=True)
+    val_emb = model.encode(list(val_texts), batch_size=128, show_progress_bar=True)
     del model; torch.cuda.empty_cache()
 
     _save_cache("bge_m3", train_emb, val_emb)
@@ -76,14 +76,12 @@ def get_bge_m3_embeddings(train_texts, val_texts):
 
 def finetune_gemma(train_df, text_col="text", label_col="label",
                    output_dir="./gemma-finetuned",
-                   epochs=3, batch_size=64, lr=2e-5):
-    """
-    Fine-tune EmbeddingGemma on your classification labels.
-    Run ONCE, then use get_gemma_finetuned_embeddings.
-    """
+                   epochs=3, batch_size=16, lr=2e-5):  # 16 is safe, 32 if lucky
     if os.path.exists(output_dir) and os.listdir(output_dir):
         print(f"Fine-tuned model already exists at {output_dir}, skipping.")
         return
+
+    os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 
     model = SentenceTransformer("google/embeddinggemma-300m", device="cuda")
 
@@ -97,10 +95,12 @@ def finetune_gemma(train_df, text_col="text", label_col="label",
     args = SentenceTransformerTrainingArguments(
         output_dir=output_dir,
         num_train_epochs=epochs,
-        per_device_train_batch_size=batch_size,
+        per_device_train_batch_size=batch_size,     # 16 instead of 64
+        gradient_accumulation_steps=4,              # effective batch = 64 still
         learning_rate=lr,
         warmup_ratio=0.1,
         fp16=True,
+        gradient_checkpointing=True,                # ~40% VRAM savings
         logging_steps=100,
         save_strategy="epoch",
     )
@@ -113,15 +113,14 @@ def finetune_gemma(train_df, text_col="text", label_col="label",
     print(f"Fine-tuned model saved to {output_dir}")
     del model; torch.cuda.empty_cache()
 
-
 def get_gemma_finetuned_embeddings(train_texts, val_texts, model_dir="./gemma-finetuned"):
     """Use after calling finetune_gemma()."""
     cached = _load_cache("gemma_finetuned")
     if cached: return cached
 
     model = SentenceTransformer(model_dir, device="cuda")
-    train_emb = model.encode(list(train_texts), batch_size=256, prompt_name="Classification", show_progress_bar=True)
-    val_emb = model.encode(list(val_texts), batch_size=256, prompt_name="Classification", show_progress_bar=True)
+    train_emb = model.encode(list(train_texts), batch_size=128, prompt_name="Classification", show_progress_bar=True)
+    val_emb = model.encode(list(val_texts), batch_size=128, prompt_name="Classification", show_progress_bar=True)
     del model; torch.cuda.empty_cache()
 
     _save_cache("gemma_finetuned", train_emb, val_emb)
