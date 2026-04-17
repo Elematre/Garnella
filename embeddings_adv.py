@@ -80,8 +80,9 @@ def get_bge_m3_embeddings(train_texts, val_texts):
 
 
 # =============================================================================
-# 3. FINE-TUNING
+# 3. FINE-TUNING GEMMA
 # =============================================================================
+# I used LoRA to speed up finetuning and used 
 def finetune_gemma(train_df, text_col="sentence", label_col="label",
                    output_dir="./gemma-finetuned",
                    epochs=2, batch_size=128, lr=2e-4,
@@ -109,7 +110,7 @@ def finetune_gemma(train_df, text_col="sentence", label_col="label",
         "label": list(train_df[label_col].astype(int)),
     })
 
-    loss = losses.BatchAllTripletLoss(model)
+    loss = losses.BatchAllTripletLoss(model, margin=0.5)
 
     args = SentenceTransformerTrainingArguments(
         output_dir=output_dir,
