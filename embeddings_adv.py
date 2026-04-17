@@ -101,8 +101,8 @@ def finetune_gemma(train_df, text_col="sentence", label_col="label",
     )
     peft_model = get_peft_model(model[0].auto_model, lora_config)
     peft_model.print_trainable_parameters()
+    peft_model.gradient_checkpointing_enable()
     model[0].auto_model = peft_model
-    print("After assignment:", type(model[0].auto_model).__name__)
 
     train_dataset = Dataset.from_dict({
         "sentence": list(train_df[text_col]),
