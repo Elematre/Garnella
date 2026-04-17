@@ -30,8 +30,8 @@ def get_gemma_embeddings_v2(train_texts, val_texts):
     if cached: return cached
 
     model = SentenceTransformer("google/embeddinggemma-300m", device="cuda")
-    train_emb = model.encode(list(train_texts), batch_size=128, prompt_name="Classification", show_progress_bar=True)
-    val_emb = model.encode(list(val_texts), batch_size=128, prompt_name="Classification", show_progress_bar=True)
+    train_emb = model.encode(list(train_texts), batch_size=256, prompt_name="Classification", show_progress_bar=True)
+    val_emb = model.encode(list(val_texts), batch_size=256, prompt_name="Classification", show_progress_bar=True)
     del model; torch.cuda.empty_cache()
 
     _save_cache("gemma_v2", train_emb, val_emb)
@@ -49,8 +49,8 @@ def get_gte_multilingual_embeddings(train_texts, val_texts):
     if cached: return cached
 
     model = SentenceTransformer("Alibaba-NLP/gte-multilingual-base", trust_remote_code=True, device="cuda")
-    train_emb = model.encode(list(train_texts), batch_size=128, show_progress_bar=True)
-    val_emb = model.encode(list(val_texts), batch_size=128, show_progress_bar=True)
+    train_emb = model.encode(list(train_texts), batch_size=256, show_progress_bar=True)
+    val_emb = model.encode(list(val_texts), batch_size=256, show_progress_bar=True)
     del model; torch.cuda.empty_cache()
 
     _save_cache("gte_multilingual", train_emb, val_emb)
@@ -62,8 +62,8 @@ def get_bge_m3_embeddings(train_texts, val_texts):
     if cached: return cached
 
     model = SentenceTransformer("BAAI/bge-m3", device="cuda")
-    train_emb = model.encode(list(train_texts), batch_size=128, show_progress_bar=True)
-    val_emb = model.encode(list(val_texts), batch_size=128, show_progress_bar=True)
+    train_emb = model.encode(list(train_texts), batch_size=256, show_progress_bar=True)
+    val_emb = model.encode(list(val_texts), batch_size=256, show_progress_bar=True)
     del model; torch.cuda.empty_cache()
 
     _save_cache("bge_m3", train_emb, val_emb)
@@ -76,7 +76,7 @@ def get_bge_m3_embeddings(train_texts, val_texts):
 
 def finetune_gemma(train_df, text_col="text", label_col="label",
                    output_dir="./gemma-finetuned",
-                   epochs=3, batch_size=16, lr=2e-5):  # 16 is safe, 32 if lucky
+                   epochs=3, batch_size=32, lr=2e-5):  # 16 is safe, 32 if lucky
     if os.path.exists(output_dir) and os.listdir(output_dir):
         print(f"Fine-tuned model already exists at {output_dir}, skipping.")
         return
@@ -119,8 +119,8 @@ def get_gemma_finetuned_embeddings(train_texts, val_texts, model_dir="./gemma-fi
     if cached: return cached
 
     model = SentenceTransformer(model_dir, device="cuda")
-    train_emb = model.encode(list(train_texts), batch_size=128, prompt_name="Classification", show_progress_bar=True)
-    val_emb = model.encode(list(val_texts), batch_size=128, prompt_name="Classification", show_progress_bar=True)
+    train_emb = model.encode(list(train_texts), batch_size=256, prompt_name="Classification", show_progress_bar=True)
+    val_emb = model.encode(list(val_texts), batch_size=256, prompt_name="Classification", show_progress_bar=True)
     del model; torch.cuda.empty_cache()
 
     _save_cache("gemma_finetuned", train_emb, val_emb)
