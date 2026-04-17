@@ -37,7 +37,14 @@ def get_mlp():
 def get_random_forest():
     return RandomForestClassifier(n_estimators=300, n_jobs=-1, random_state=1)
 
-
+def get_random_forest_v2():
+    return RandomForestClassifier(
+        n_estimators=300,
+        max_depth=10,        # limit tree depth
+        min_samples_leaf=5,  # require at least 5 samples per leaf
+        n_jobs=-1,
+        random_state=1,
+    )
 def get_xgboost():
     return xgb.XGBClassifier(
         n_estimators=300, max_depth=6, learning_rate=0.1,

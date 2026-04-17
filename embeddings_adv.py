@@ -29,7 +29,7 @@ def _load_cache(name):
 
 def _encode_with(model_name, cache_key, train_texts, val_texts,
                  prompt_name=None, trust_remote_code=False,
-                 max_seq_length=64, batch_size=256):
+                 max_seq_length=64, batch_size=512):
     cached = _load_cache(cache_key)
     if cached is not None:
         return cached
