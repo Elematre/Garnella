@@ -101,7 +101,7 @@ def finetune_gemma(train_df, text_col="sentence", label_col="label",
     )
     peft_model = get_peft_model(model[0].auto_model, lora_config)
     peft_model.print_trainable_parameters()
-    peft_model.gradient_checkpointing_enable()
+    #peft_model.gradient_checkpointing_enable()
     model[0].auto_model = peft_model
 
     train_dataset = Dataset.from_dict({
@@ -130,7 +130,13 @@ def finetune_gemma(train_df, text_col="sentence", label_col="label",
     trainer.train()
 
     # Merge LoRA weights so the saved model is a standalone ST model
-    model[0].auto_model = model[0].auto_model.merge_and_unload()
+    # Grab the PEFT-wrapped model from the trainer (the SentenceTransformer
+    # wrapper may have unwrapped auto_model along the way)
+    trainer_auto_model = trainer.model[0].auto_model
+    if hasattr(trainer_auto_model, "merge_and_unload"):
+        model[0].auto_model = trainer_auto_model.merge_and_unload()
+    else:
+        model[0].auto_model = trainer_auto_model
     model.save_pretrained(output_dir)
 
     del model
