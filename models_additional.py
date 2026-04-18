@@ -130,23 +130,37 @@ def get_mlp_regressor():
         )
     )
 
-def get_xgboost_mae():
-    """XGBoost regressor that DIRECTLY optimizes MAE — aligns with the metric.
+# def get_xgboost_mae():
+#     """XGBoost regressor that DIRECTLY optimizes MAE — aligns with the metric.
 
-    This is probably the single best Track 1 model you'll find. Unlike
-    classification XGBoost (which optimizes cross-entropy then argmax'es),
-    this optimizes L1 loss end-to-end.
-    """
+#     This is probably the single best Track 1 model you'll find. Unlike
+#     classification XGBoost (which optimizes cross-entropy then argmax'es),
+#     this optimizes L1 loss end-to-end.
+#     """
+#     return RegressorAsClassifier(
+#         xgb.XGBRegressor(
+#             n_estimators=500,
+#             max_depth=6,
+#             learning_rate=0.05,
+#             subsample=0.9,
+#             colsample_bytree=0.9,
+#             objective="reg:absoluteerror",   # <- directly optimizes MAE
+#             device="cuda",
+#             n_jobs=-1,
+#             random_state=1,
+#         )
+#     )
+
+def get_xgboost_mae():
     return RegressorAsClassifier(
         xgb.XGBRegressor(
-            n_estimators=500,
+            n_estimators=1500,        # was 500
             max_depth=6,
-            learning_rate=0.05,
+            learning_rate=0.1,         # was 0.05
             subsample=0.9,
             colsample_bytree=0.9,
-            objective="reg:absoluteerror",   # <- directly optimizes MAE
+            objective="reg:absoluteerror",
             device="cuda",
-            n_jobs=-1,
             random_state=1,
         )
     )
