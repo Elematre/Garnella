@@ -97,7 +97,7 @@ def _mean_pool(last_hidden_state, attention_mask):
 
 
 def _encode_hf(model_name, cache_key, train_texts, val_texts,
-               max_seq_length=128, batch_size=64, pooling="mean"):
+               max_seq_length=128, batch_size=256, pooling="mean"):
     """Run a HuggingFace transformer forward-only over the texts and cache the output.
 
     pooling: "mean" (masked mean over tokens) or "cls" (first token).
@@ -111,7 +111,7 @@ def _encode_hf(model_name, cache_key, train_texts, val_texts,
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     tokenizer = AutoTokenizer.from_pretrained(model_name)
-    model = AutoModel.from_pretrained(model_name).to(device)
+    model = AutoModel.from_pretrained(model_name, torch_dtype=torch.bfloat16).to(device)
     model.eval()
 
     def encode(texts):
@@ -127,7 +127,8 @@ def _encode_hf(model_name, cache_key, train_texts, val_texts,
                     vecs = hidden[:, 0, :]
                 else:
                     vecs = _mean_pool(hidden, enc["attention_mask"])
-                out.append(vecs.cpu().numpy())
+                # Cast to fp32 before moving to numpy (bfloat16 → numpy conversion needs this)
+                out.append(vecs.float().cpu().numpy())
                 if start % (batch_size * 20) == 0:
                     print(f"  {cache_key}: encoded {start + len(batch)}/{len(texts)}")
         return np.vstack(out)
@@ -140,7 +141,6 @@ def _encode_hf(model_name, cache_key, train_texts, val_texts,
 
     _save_cache(cache_key, train_emb, val_emb)
     return train_emb, val_emb
-
 
 def get_nlptown_sentiment_embeddings(train_texts, val_texts):
     """nlptown/bert-base-multilingual-uncased-sentiment as frozen feature extractor.
