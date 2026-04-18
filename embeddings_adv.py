@@ -155,7 +155,7 @@ def get_nlptown_sentiment_embeddings(train_texts, val_texts):
         "nlptown/bert-base-multilingual-uncased-sentiment",
         "nlptown_sentiment",
         train_texts, val_texts,
-        max_seq_length=128, batch_size=64, pooling="cls",
+        max_seq_length=128, batch_size=256, pooling="cls",
     )
 
 
@@ -175,7 +175,7 @@ def get_multilingual_e5_embeddings(train_texts, val_texts):
         "intfloat/multilingual-e5-base",
         "multilingual_e5",
         prefixed_train, prefixed_val,
-        max_seq_length=128, batch_size=64, pooling="mean",  # E5 uses mean pooling
+        max_seq_length=128, batch_size=256, pooling="mean",  # E5 uses mean pooling
     )
 
 def get_tabularisai_sentiment_embeddings(train_texts, val_texts):
@@ -187,7 +187,7 @@ def get_tabularisai_sentiment_embeddings(train_texts, val_texts):
         "tabularisai/multilingual-sentiment-analysis",
         "tabularisai_sentiment",
         train_texts, val_texts,
-        max_seq_length=128, batch_size=64, pooling="cls",
+        max_seq_length=128, batch_size=256, pooling="cls",
     )
 
 
