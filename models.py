@@ -72,3 +72,4 @@ def get_xgboost_tuned():
         xgb.XGBClassifier(n_estimators=300, device="cuda", n_jobs=-1, random_state=1),
         param_grid, cv=3, scoring="neg_mean_absolute_error", n_jobs=1,
     )
+
