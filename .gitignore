@@ -3,3 +3,4 @@ embedding_cache/
 data/
 .venv/
 *.npy
+.DS_Store
