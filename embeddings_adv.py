@@ -142,20 +142,41 @@ def _encode_hf(model_name, cache_key, train_texts, val_texts,
     return train_emb, val_emb
 
 
-def get_twitter_xlmr_sentiment_embeddings(train_texts, val_texts):
-    """cardiffnlp/twitter-xlm-roberta-base-sentiment as a frozen feature extractor.
+def get_nlptown_sentiment_embeddings(train_texts, val_texts):
+    """nlptown/bert-base-multilingual-uncased-sentiment as frozen feature extractor.
 
-    Multilingual (100 languages), fine-tuned on ~198M tweets for 3-way sentiment
-    (neg/neu/pos). The CLS-token representation was directly supervised on
-    sentiment so it's a good choice here.
+    BERT-multilingual fine-tuned on product reviews (Amazon) for 1-5 star
+    prediction. This is the closest possible label-scheme match to our task
+    — literally the same 5-star prediction, on product reviews, covering both
+    English and German. Uses WordPiece tokenization so no sentencepiece
+    dependency.
     """
     return _encode_hf(
-        "cardiffnlp/twitter-xlm-roberta-base-sentiment",
-        "twitter_xlmr_sentiment",
+        "nlptown/bert-base-multilingual-uncased-sentiment",
+        "nlptown_sentiment",
         train_texts, val_texts,
         max_seq_length=128, batch_size=64, pooling="cls",
     )
 
+
+def get_multilingual_e5_embeddings(train_texts, val_texts):
+    """intfloat/multilingual-e5-base as frozen feature extractor.
+
+    Not sentiment-specialized — it's a general-purpose multilingual embedder
+    trained with a contrastive objective for retrieval/similarity tasks.
+    Included as a comparison point: is a high-quality general embedder
+    competitive with sentiment-specialized ones? E5 requires the 'query: '
+    prefix by convention, but for classification we use 'passage: ' which
+    matches how it was trained on document-side inputs.
+    """
+    prefixed_train = [f"passage: {t}" for t in train_texts]
+    prefixed_val = [f"passage: {t}" for t in val_texts]
+    return _encode_hf(
+        "intfloat/multilingual-e5-base",
+        "multilingual_e5",
+        prefixed_train, prefixed_val,
+        max_seq_length=128, batch_size=64, pooling="mean",  # E5 uses mean pooling
+    )
 
 def get_tabularisai_sentiment_embeddings(train_texts, val_texts):
     """tabularisai/multilingual-sentiment-analysis — another sentiment-pretrained
