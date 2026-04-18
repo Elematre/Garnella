@@ -22,7 +22,6 @@ def get_knn():
 
 
 def get_mlp():
-    # fixes the 98%/54% overfit: smaller net, more L2, early stopping
     return MLPClassifier(
         hidden_layer_sizes=(128,),
         alpha=1e-2,
