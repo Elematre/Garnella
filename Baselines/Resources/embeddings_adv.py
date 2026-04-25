@@ -34,9 +34,23 @@ def _encode_with(model_name, cache_key, train_texts, val_texts,
     if cached is not None:
         return cached
 
-    model = SentenceTransformer(
-        model_name, device="cuda", trust_remote_code=trust_remote_code,
-    )
+    # Try GPU first, fall back to CPU on error
+    device = "cuda"
+    try:
+        model = SentenceTransformer(
+            model_name, device=device, trust_remote_code=trust_remote_code,
+        )
+        print(f"  Using device: {device}")
+    except Exception as e:
+        if "CUDA" in str(e) or "cuda" in str(e).lower():
+            print(f"  ⚠ GPU not available ({type(e).__name__}), falling back to CPU")
+            device = "cpu"
+            model = SentenceTransformer(
+                model_name, device=device, trust_remote_code=trust_remote_code,
+            )
+        else:
+            raise
+
     model.max_seq_length = max_seq_length
 
     kwargs = {"batch_size": batch_size, "show_progress_bar": True}
@@ -47,7 +61,8 @@ def _encode_with(model_name, cache_key, train_texts, val_texts,
     val_emb = model.encode(list(val_texts), **kwargs)
 
     del model
-    torch.cuda.empty_cache()
+    if device == "cuda":
+        torch.cuda.empty_cache()
 
     _save_cache(cache_key, train_emb, val_emb)
     return train_emb, val_emb

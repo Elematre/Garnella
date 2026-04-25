@@ -93,6 +93,10 @@ _STOPWORDS = _SW_EN | _SW_DE
 
 def _split_title_body(text: str) -> tuple[str, str]:
     """Split title from body on the blank line separating them."""
+    # Handle NaN, None, and non-string types
+    if text is None or (isinstance(text, float) and pd.isna(text)):
+        return "", ""
+    text = str(text)  # Ensure it's a string
     parts = text.split("\n\n", 1)
     title = parts[0].strip()
     body = parts[1].strip() if len(parts) > 1 else ""
@@ -285,6 +289,10 @@ def preprocess(text: str, version: int = 2) -> str:
     """
     if version not in _VERSION_MAP:
         raise ValueError(f"version must be 1–6, got {version}")
+    # Handle NaN, None, and non-string types
+    if text is None or (isinstance(text, float) and pd.isna(text)):
+        return ""
+    text = str(text)  # Ensure it's a string
     return _VERSION_MAP[version](text)
 
 
@@ -302,7 +310,7 @@ def preprocess_df(series: pd.Series, version: int = 2) -> pd.Series:
     fn = _VERSION_MAP.get(version)
     if fn is None:
         raise ValueError(f"version must be 1–6, got {version}")
-    return series.apply(fn)
+    return series.apply(lambda x: preprocess(x, version=version))
 
 
 # ---------------------------------------------------------------------------
