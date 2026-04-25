@@ -29,12 +29,14 @@ export HF_TOKEN=your_token_here
 From the `Baselines` directory, submit a job with Slurm:
 
 ```bash
-sbatch -A cil -o ~/repo/Baselines/results/sBatchOut/%j.out ExperimentBaseline.py --model Gemma_LogReg
+conda activate <your-env-name>
+sbatch -A cil -o ~/repo/Baselines/results/sBatchOut/%j.out ~/repo/Baselines/ExperimentBaseline.py --model Gemma_MLP_EV
 
 ```
 or run from the Terminal
 
 ```bash
+conda activate <your-env-name>
 python ExperimentBaseline.py --model Gemma_MLP_EV
 
 ```
