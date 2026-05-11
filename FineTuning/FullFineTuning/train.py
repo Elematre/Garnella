@@ -26,7 +26,6 @@ EarlyStoppingCallback,
 DataCollatorWithPadding,
 )
 from sklearn.metrics import accuracy_score, mean_absolute_error
-logger = logging.getLogger(__name__)
 
 NUM_LABELS = 5
 
@@ -53,7 +52,6 @@ def parse_args():
     p.add_argument("--num_train_epochs",           type=int,   default=5)
     p.add_argument("--evaluation_strategy",        type=str,   default="epoch")
     p.add_argument("--output_dir",                 default="./output")
-    # p.add_argument("--overwrite_output_dir",       action="store_true")
     p.add_argument("--report_to",                  default="none")
     p.add_argument("--run_name", type=str, default=None)
     p.add_argument("--seed",                       type=int,   default=42)
@@ -94,8 +92,16 @@ def compute_metrics(eval_pred):
         }
 # ── Main ──────────────────────────────────────────────────────────────────────
 def main():
+    # configure logging so logger.info() actually writes to the log file
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(message)s",
+    )
+    logger = logging.getLogger(__name__)
+
     args = parse_args()
     torch.manual_seed(args.seed)
+    os.makedirs(args.output_dir, exist_ok=True)
 
     ### sanity checks 
     assert torch.cuda.is_available(), \
@@ -108,7 +114,7 @@ def main():
     logger.info(f"CUDA version    : {torch.version.cuda}")
     logger.info(f"GPU             : {torch.cuda.get_device_name(0)}")
 
-    os.makedirs(args.output_dir, exist_ok=True)
+
     logger.info("Loading tokenizer and model")
     # download weights from HuggingFace Hub or load from a local path
     tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path)
@@ -174,7 +180,7 @@ def main():
         args=training_args,
         train_dataset=train_dataset if args.do_train else None,
         eval_dataset=val_dataset,
-        tokenizer=tokenizer,
+        processing_class=tokenizer,
         # takes a batch of variable-length tokenized sequences and pads them all to the same length (the longest in that batch)
         data_collator=DataCollatorWithPadding(tokenizer),
         compute_metrics=compute_metrics,
@@ -200,8 +206,14 @@ def main():
         logger.info("Running prediction on test set")
         predictions = trainer.predict(test_dataset)
         preds = np.argmax(predictions.predictions, axis=-1)
-        out_path = Path(args.output_dir) / "predictions.csv"
-        pd.DataFrame({"label": preds}).to_csv(out_path, index=False)
+
+        submission = pd.DataFrame({
+            "id": test_df.index,
+            "label": preds
+        })
+
+        out_path = Path(args.output_dir) / "submission.csv"
+        submission.to_csv(out_path, index=False)
         logger.info(f"Predictions saved to {out_path}")
 
 if __name__ == "__main__":

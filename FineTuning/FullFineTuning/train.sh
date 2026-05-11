@@ -48,4 +48,8 @@ python train.py \
     --run_name xlmr_full_finetune_051126_1527 \
 
 
-#cp -r /work/scratch/ehaenni/output/051126_1527/final_model ~/Garnella/FineTuning/FullFineTuning/final_model
+#cp -r /work/scratch/ehaenni/output/051126_1527/final_model ~/Garnella/FineTuning/FullFineTuning/051126_1527/final_model
+#cp -r /work/scratch/ehaenni/output/051126_1527/checkpoint-17720 ~/Garnella/FineTuning/FullFineTuning/051126_1527/checkpoint-17720
+
+
+# cp -r /work/scratch/ehaenni/output/051126_1527/predictions.csv ~/Garnella/FineTuning/FullFineTuning/051126_1527/predictions.csv

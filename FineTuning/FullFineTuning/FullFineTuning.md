@@ -19,7 +19,7 @@ pip install 'accelerate>=1.1.0'
 go to Garnella/FineTuning/FullFineTuning and run: 
 
 ```bash
-sbatch ~/LoRA-XS/train.sh
+sbatch /train.sh
 ```
 
 
@@ -27,5 +27,5 @@ Monitor:
 
 ```bash
 squeue --me                          # check job status
-tail -f /logs/train_*.log  # watch live output
+tail -f logs/train_*.log  # watch live output
 ```
