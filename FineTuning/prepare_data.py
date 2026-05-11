@@ -29,9 +29,10 @@ from sklearn.model_selection import train_test_split
 RAW_TRAIN = "/cluster/courses/cil/text-classification/data/train.csv"
 RAW_TEST  = "/cluster/courses/cil/text-classification/data/test.csv"
 
-OUT_TRAIN = "/home/mdietsche/data/train_split.csv"
-OUT_VAL   = "/home/mdietsche/data/val_split.csv"
-OUT_TEST  = "/home/mdietsche/data/test_inference.csv"
+# TODO before running it: Update these paths to your local data directory.
+OUT_TRAIN = "/home/ehaenni/data/train_split.csv"
+OUT_VAL   = "/home/ehaenni/data/val_split.csv"
+OUT_TEST  = "/home/ehaenni/data/test_inference.csv"
 
 # --- Train / validation split ---
 train_df = pd.read_csv(RAW_TRAIN)[["sentence", "label"]]
