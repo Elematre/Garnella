@@ -1,0 +1,1 @@
+{"reconstruction_type": "svd", "reconstr_mode": "separated", "half_init_dec": false, "replacement_module_random_init": false, "r_squared": true, "svd": {"n_iter": 10, "random_state": 42, "rank": 16}}

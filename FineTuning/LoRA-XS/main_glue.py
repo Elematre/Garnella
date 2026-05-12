@@ -34,6 +34,7 @@ from transformers import (
     default_data_collator,
     set_seed,
     get_linear_schedule_with_warmup,
+     EarlyStoppingCallback, #meli: for early stopping 
 )
 from peft import (
     get_peft_config,
@@ -692,6 +693,10 @@ def main():
         preds = p.predictions[0] if isinstance(p.predictions, tuple) else p.predictions
         preds = np.squeeze(preds) if is_regression else np.argmax(preds, axis=1)
         result = metric.compute(predictions=preds, references=p.label_ids)
+        #meli: Kaggle scoring: L = 1 - MAE/4 (ordinal labels 0-4, max possible error = 4)
+        mae = np.mean(np.abs(preds.astype(float) - p.label_ids.astype(float)))
+        result["kaggle_score"] = float(1.0 - mae / 4.0)
+        #meli -
         if len(result) > 1:
             result["combined_score"] = np.mean(list(result.values())).item()
         return result
@@ -746,6 +751,7 @@ def main():
         tokenizer=tokenizer,
         data_collator=data_collator,
         optimizers=(optimizer, scheduler),
+        callbacks=[EarlyStoppingCallback(early_stopping_patience=3)], #meli: for early stopping
     )
     for cb in trainer.callback_handler.callbacks:
         if isinstance(cb, transformers.integrations.NeptuneCallback):
