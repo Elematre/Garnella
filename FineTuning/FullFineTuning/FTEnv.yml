@@ -1,0 +1,19 @@
+name: my-cil-env
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.11
+  - pip
+  - transformers=5.8.1
+  - datasets=4.8.5
+  - evaluate
+  - scikit-learn
+  - pandas
+  - numpy
+  - pip:
+      - --extra-index-url https://download.pytorch.org/whl/cu128
+      - torch==2.11.0+cu128
+      - accelerate>=1.1.0
+      - wandb
+      - fsspec[http]<=2026.2.0

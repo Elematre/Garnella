@@ -5,3 +5,4 @@ data/
 *.npy
 .DS_Store
 Baselines/results/sBatchOut/
+FineTuning/FullFineTuning/outputs/

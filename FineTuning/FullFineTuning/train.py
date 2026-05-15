@@ -212,7 +212,7 @@ def main():
             "label": preds
         })
 
-        out_path = Path(args.output_dir) / "submission.csv"
+        out_path = Path(args.output_dir) / "predictions.csv"
         submission.to_csv(out_path, index=False)
         logger.info(f"Predictions saved to {out_path}")
 
