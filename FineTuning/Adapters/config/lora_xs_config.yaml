@@ -1,0 +1,75 @@
+# LoRA-XS Configuration for xlm-roberta-large
+# ============================================
+# 
+# LoRA-XS: Low-Rank Adaptation with Extremely Small Number of Parameters
+# Key idea: Use SVD-computed frozen A/B matrices with trainable R x R matrix between them
+# Result: Parameter efficiency ~100x compared to full fine-tuning
+#
+# Reference: https://arxiv.org/abs/2405.17604
+
+# LoRA rank: number of singular vectors to use in SVD decomposition
+# - Typical range: 4, 8, 16, 32
+# - For xlm-roberta-large (24 layers, ~350M params):
+#   r=8 → ~2-3M trainable params (vs ~350M full)
+lora_rank: 16
+
+# Target modules where to apply LoRA
+# - For transformers: typically attention (q, k, v) and feed-forward layers
+# - For xlm-roberta: "attention.self.query", "attention.self.key", "attention.self.value", "output.dense" (FFN)
+# - Using a subset reduces params further, but "all" (dense layers) is often better
+target_modules:
+  - "query"
+  - "key"
+  - "value"
+  - "dense"  # FFN intermediate and output layers
+
+# SVD configuration
+svd:
+  # Rank for SVD decomposition (should match lora_rank in most cases)
+  rank: 16
+  
+  # Number of Lanczos iterations (higher = better accuracy, slower computation)
+  # - 30-50 is typical; increase if needed for numerical stability
+  n_iter: 50
+  
+  # Reconstruction mode: how to distribute singular values between A and B
+  # - "original": A = U, B = diag(S) @ Vt (all singular values in B)
+  # - "separated": A = U @ sqrt(diag(S)), B = sqrt(diag(S)) @ Vt (balanced)
+  reconstruction_mode: "separated"
+  
+  # Whether to cache computed SVD decompositions (first run is slower, subsequent runs reuse cache)
+  use_cache: true
+
+# PEFT LoRA configuration
+peft:
+  # LoRA alpha: scaling factor for adapter output
+  # - Recommended: lora_alpha = lora_rank for neutral initialization
+  # - Increase for more aggressive adapter contribution
+  lora_alpha: 32
+  
+  # Dropout applied to LoRA activations (prevents overfitting in low-param regime)
+  lora_dropout: 0.1
+  
+  # Whether to apply LoRA to bias terms (usually not needed)
+  bias: "none"
+  
+  # Task type (causal_lm for decoder, seq2seq_lm for encoder-decoder, seq_cls for classification)
+  task_type: "SEQ_CLS"
+
+# Initialization
+init:
+  # How to initialize the trainable R x R matrix
+  # - "kaiming": kaiming_uniform_ (recommended for ReLU-like behaviors)
+  # - "normal": Gaussian with small std
+  r_matrix_init: "kaiming"
+  
+  # If normal, the standard deviation for initialization
+  r_matrix_std: 0.02
+
+# Logging
+logging:
+  # Log parameter statistics after applying adapter
+  log_param_stats: true
+  
+  # Verify SVD reconstruction quality (debugging)
+  verify_reconstruction: false

@@ -48,17 +48,29 @@ mkdir -p "$HF_HOME" "$WANDB_DIR"
 echo "Launching run $RUN_ID for user $FT_USERNAME"
 echo "Output directory: $RUN_DIR"
 
+# Define model and adapter to use
+MODEL_PATH="xlm-roberta-base"
+ADAPTER_TYPE="lora-xs"
+
+# Extract model size from model path (e.g., "base" from "xlm-roberta-base")
+MODEL_SIZE="${MODEL_PATH##*-}"
+
+# Build run name: xlmr_{model_size}_{adapter}_{timestamp}
+RUN_NAME="xlmr_${MODEL_SIZE}_${ADAPTER_TYPE}_${RUN_ID}"
+# for adapter we use lr = 2e-4 otherwise 2e-5
+
 python train.py \
-    --model_name_or_path    xlm-roberta-base \
+    --model_name_or_path    "$MODEL_PATH" \
+    --adapter               "$ADAPTER_TYPE" \
     --train_file            "$FT_DATA_DIR/train_split.csv" \
     --validation_file       "$FT_DATA_DIR/val_split.csv" \
     --test_file             "$FT_DATA_DIR/test_inference.csv" \
     --do_train --do_eval --do_predict \
     --max_seq_length        256 \
     --per_device_train_batch_size 64 \
-    --learning_rate         2e-5 \
-    --num_train_epochs      1 \
+    --learning_rate         2e-4 \ 
+    --num_train_epochs      5 \
     --evaluation_strategy   epoch \
     --output_dir            "$RUN_DIR" \
     --report_to             "$FT_REPORT_TO" \
-    --run_name              "xlmr_full_finetune_${FT_USERNAME}_${RUN_ID}"
+    --run_name              "$RUN_NAME"

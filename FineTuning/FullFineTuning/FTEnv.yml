@@ -7,6 +7,7 @@ dependencies:
   - pip
   - transformers=5.8.1
   - datasets=4.8.5
+  - peft
   - evaluate
   - scikit-learn
   - pandas
@@ -14,6 +15,8 @@ dependencies:
   - pip:
       - --extra-index-url https://download.pytorch.org/whl/cu128
       - torch==2.11.0+cu128
+      - torchvision==0.26.0+cu128
+      - torchaudio==2.11.0+cu128
       - accelerate>=1.1.0
       - wandb
       - fsspec[http]<=2026.2.0

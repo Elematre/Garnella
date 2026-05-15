@@ -12,6 +12,7 @@ submission.
 import argparse
 import logging
 import os
+import sys
 import numpy as np
 import pandas as pd
 from pathlib import Path
@@ -26,6 +27,10 @@ EarlyStoppingCallback,
 DataCollatorWithPadding,
 )
 from sklearn.metrics import accuracy_score, mean_absolute_error
+
+# Import adapter factory
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from Adapters import load_adapter
 
 NUM_LABELS = 5
 
@@ -55,6 +60,11 @@ def parse_args():
     p.add_argument("--report_to",                  default="none")
     p.add_argument("--run_name", type=str, default=None)
     p.add_argument("--seed",                       type=int,   default=42)
+    # parameter-efficient fine-tuning adapter
+    p.add_argument("--adapter",                    type=str,   default="none",
+                   help="Adapter to use: 'none' (baseline), 'lora', 'lora-xs', 'rxr-shared'")
+    p.add_argument("--adapter_config_dir",        type=str,   default=None,
+                   help="Directory with adapter config files. If None, uses defaults.")
     return p.parse_args()
 
 # ── Dataset ───────────────────────────────────────────────────────────────────
@@ -124,6 +134,15 @@ def main():
         num_labels=NUM_LABELS,
         ignore_mismatched_sizes=True,
     )
+    
+    # Apply adapter if specified
+    if args.adapter != "none":
+        logger.info(f"Applying adapter: {args.adapter}")
+        adapter_config_dir = args.adapter_config_dir if args.adapter_config_dir else None
+        model = load_adapter(args.adapter, model, config_dir=adapter_config_dir)
+        logger.info(f"Successfully applied {args.adapter} adapter")
+    else:
+        logger.info("No adapter applied (baseline, full fine-tuning)")
 
     logger.info("Loading datasets")
     train_df = pd.read_csv(args.train_file)
