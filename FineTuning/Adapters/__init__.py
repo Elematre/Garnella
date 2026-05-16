@@ -26,6 +26,7 @@ import torch
 from transformers import PreTrainedModel
 
 from .base import AdapterBase
+from .classifier_only import XLMRobertaClassifierOnly
 from .lora import XLMRobertaLoRA
 from .lora_xs import XLMRobertaLoRAXS
 from .rxr_shared import XLMRobertaRxRShared
@@ -46,6 +47,7 @@ def load_adapter(
     Args:
         adapter_name: Name of the adapter to use. Options:
             - "none": No adapter (baseline, full fine-tuning)
+            - "classifier-only": Freeze encoder, train only classifier head
             - "lora": LoRA (low-rank adaptation with random initialization)
             - "lora-xs": LoRA-XS (extended LoRA with SVD support, for later development)
             - "rxr-shared": Custom RxR matrix sharing (placeholder)
@@ -81,7 +83,12 @@ def load_adapter(
         return model
     
     # Instantiate and apply adapter
-    if adapter_name == "lora":
+    if adapter_name == "classifier-only":
+        adapter = XLMRobertaClassifierOnly()
+        model = adapter.apply(model)
+        logger.info("Successfully applied Classifier-Only adapter")
+    
+    elif adapter_name == "lora":
         adapter = XLMRobertaLoRA()
         model = adapter.apply(model)
         logger.info("Successfully applied LoRA adapter")
@@ -108,7 +115,7 @@ def load_adapter(
     else:
         raise ValueError(
             f"Unknown adapter: '{adapter_name}'\n"
-            f"Supported adapters: 'none', 'lora', 'lora-xs', 'rxr-shared'"
+            f"Supported adapters: 'none', 'classifier-only', 'lora', 'lora-xs', 'rxr-shared'"
         )
     
     return model
@@ -117,6 +124,7 @@ def load_adapter(
 __all__ = [
     "load_adapter",
     "AdapterBase",
+    "XLMRobertaClassifierOnly",
     "XLMRobertaLoRA",
     "XLMRobertaLoRAXS",
     "XLMRobertaRxRShared",
