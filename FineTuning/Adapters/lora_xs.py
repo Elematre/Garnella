@@ -24,6 +24,7 @@ from peft.tuners.lora import Linear as LoraLinear
 from transformers import PreTrainedModel
 
 from .base import AdapterBase
+from .utils.svd_init import get_frozen_ab_matrices
 
 logger = logging.getLogger(__name__)
 
@@ -45,8 +46,6 @@ class LoraXSLinear(nn.Module):
         self,
         lora_layer: LoraLinear,
         lora_rank: int,
-        r_matrix_init: str = "kaiming",
-        r_matrix_std: float = 0.02,
     ):
         """
         Initialize LoRA-XS wrapper.
@@ -65,20 +64,28 @@ class LoraXSLinear(nn.Module):
         self.lora_A = lora_layer.lora_A["default"]
         self.lora_B = lora_layer.lora_B["default"]
         
-        # CRITICAL FIX: PEFT initializes B to zero. If we freeze B at zero, 
-        # R will receive 0 gradients! We must initialize B randomly first.
-        nn.init.kaiming_uniform_(self.lora_B.weight, a=math.sqrt(5))
+        # Inject SVD-based initialization
+        # weight is (out_features, in_features)
+        base_weight = self.lora_layer.base_layer.weight.data.clone().detach().cpu().numpy()
+        A_tensor, B_tensor = get_frozen_ab_matrices(
+            weight=base_weight,
+            rank=lora_rank,
+            device="cpu"  # keep it simple, .to() handles the rest below
+        )
+        
+        # A_tensor shape: (out_features, rank) => matches lora_B.weight (out_features, rank)
+        # B_tensor shape: (rank, in_features) => matches lora_A.weight (rank, in_features)
+        self.lora_A.weight.data.copy_(B_tensor.to(self.lora_A.weight.device))
+        self.lora_B.weight.data.copy_(A_tensor.to(self.lora_B.weight.device))
         
         # Now freeze A and B
         self.lora_A.weight.requires_grad_(False)
         self.lora_B.weight.requires_grad_(False)
         
-        # Create trainable R matrix (rank x rank)
-        r_matrix = nn.Parameter(torch.empty(lora_rank, lora_rank))
-        if r_matrix_init == "kaiming":
-            nn.init.kaiming_uniform_(r_matrix, a=math.sqrt(5))
-        else:
-            nn.init.normal_(r_matrix, std=r_matrix_std)
+        # Create trainable R matrix (rank x rank) and initialize to zero!!!
+        # If we initialize to Identity, the adapter will output approx `W * x * scaling`
+        # and double the activations initially. Zero initialization is like standard LoRA.
+        r_matrix = nn.Parameter(torch.zeros(lora_rank, lora_rank, device=self.lora_B.weight.device))
         self.register_parameter("lora_r", r_matrix)
         
         # Get alpha and scale factor from original LoRA layer
@@ -115,8 +122,6 @@ class LoraXSLinear(nn.Module):
         cls,
         lora_layer: LoraLinear,
         lora_rank: int,
-        r_matrix_init: str = "kaiming",
-        r_matrix_std: float = 0.02,
     ) -> "LoraXSLinear":
         """
         Create LoRA-XS wrapper from a PEFT LoRA layer.
@@ -130,14 +135,12 @@ class LoraXSLinear(nn.Module):
         Returns:
             LoraXSLinear wrapper instance
         """
-        return cls(lora_layer, lora_rank, r_matrix_init, r_matrix_std)
+        return cls(lora_layer, lora_rank)
 
 
 def _replace_with_lora_xs(
     model: PreTrainedModel,
     lora_rank: int,
-    r_matrix_init: str = "kaiming",
-    r_matrix_std: float = 0.02,
 ) -> int:
     """
     Replace PEFT LoRA layers with LoRA-XS wrappers.
@@ -160,8 +163,10 @@ def _replace_with_lora_xs(
     # Use list() to avoid modifying the module structure while iterating
     modules_to_replace = []
     
+    # visits every node
     for parent_name, parent_module in model.named_modules():
         for child_name, child_module in parent_module.named_children():
+            # visits every child node of the current parent node
             if isinstance(child_module, LoraLinear):
                 modules_to_replace.append((parent_module, child_name, child_module))
                 
@@ -170,8 +175,6 @@ def _replace_with_lora_xs(
         xs_layer = LoraXSLinear.from_lora_linear(
             child_module,
             lora_rank,
-            r_matrix_init,
-            r_matrix_std,
         )
         
         # Replace the module in the parent
@@ -194,48 +197,32 @@ class XLMRobertaLoRAXS(AdapterBase):
     - Minimal parameter overhead (~1-5M for large models)
     """
     
+    # Default configuration inlined
+    DEFAULT_CONFIG = {
+        "lora_rank": 16,
+        "target_modules": ["query", "key", "value", "dense"],
+        "peft": {
+            "lora_alpha": 16,
+            "lora_dropout": 0.1,
+            "bias": "none",
+            "task_type": "SEQ_CLS",
+        },
+    }
+    
     def __init__(self, config_path: Optional[str] = None):
         """
         Initialize LoRA-XS adapter.
         
         Args:
-            config_path: Path to lora_xs_config.yaml. If None, uses built-in defaults.
+            config_path: Path to lora_xs_config.yaml. If None, uses hardcoded defaults.
         """
+        # Currenty we have no config file, so we just ignore it
         super().__init__(adapter_name="lora_xs", config_path=config_path)
-        self._validate_config()
-    
-    def _validate_config(self) -> None:
-        """Validate that required config keys are present."""
-        required_keys = ["lora_rank", "target_modules"]
-        for key in required_keys:
-            if key not in self.config:
-                logger.warning(f"Missing config key '{key}', will use defaults")
-    
-    def _get_default_config(self) -> Dict[str, Any]:
-        """Return default LoRA-XS configuration if none provided."""
-        return {
-            "lora_rank": 16,
-            "target_modules": ["query", "key", "value", "dense"],
-            "peft": {
-                "lora_alpha": 16,
-                "lora_dropout": 0.1,
-                "bias": "none",
-                "task_type": "SEQ_CLS",
-            },
-            "init": {
-                "r_matrix_init": "kaiming",
-                "r_matrix_std": 0.02,
-            },
-            "logging": {
-                "log_param_stats": True,
-            },
-        }
+        if not self.config:
+            self.config = self.DEFAULT_CONFIG.copy()
     
     def _get_config_value(self, key: str, default: Any = None) -> Any:
         """Safely get config value with fallback to default."""
-        if not self.config:
-            default_config = self._get_default_config()
-            return default_config.get(key, default)
         return self.config.get(key, default)
     
     def apply(self, model: PreTrainedModel) -> PreTrainedModel:
@@ -272,6 +259,12 @@ class XLMRobertaLoRAXS(AdapterBase):
         )
 
         model = get_peft_model(model, lora_config)
+
+        # Always unfreeze the classifier when using PEFT for classification
+        for name, param in model.named_parameters():
+            if "classifier" in name:
+                param.requires_grad = True 
+
         logger.info(f"Model wrapped with PEFT LoRA (rank={lora_rank})")
 
         # Step 2: Replace PEFT LoRA layers with LoRA-XS wrappers
@@ -292,8 +285,7 @@ class XLMRobertaLoRAXS(AdapterBase):
         )
 
         # Step 3: Log final parameter statistics
-        if logging_config.get("log_param_stats", True):
-            self.log_param_stats(model)
+        self.log_param_stats(model)
 
         return model
             

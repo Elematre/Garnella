@@ -57,6 +57,8 @@ def parse_args():
     p.add_argument("--num_train_epochs",           type=int,   default=5)
     p.add_argument("--evaluation_strategy",        type=str,   default="epoch")
     p.add_argument("--output_dir",                 default="./output")
+    p.add_argument("--checkpoint_dir",             type=str,   default=None,
+                   help="Directory for saving checkpoints. If None, uses output_dir")
     p.add_argument("--report_to",                  default="none")
     p.add_argument("--run_name", type=str, default=None)
     p.add_argument("--seed",                       type=int,   default=42)
@@ -112,6 +114,10 @@ def main():
     args = parse_args()
     torch.manual_seed(args.seed)
     os.makedirs(args.output_dir, exist_ok=True)
+    
+    # Determine checkpoint directory (defaults to output_dir if not specified)
+    checkpoint_dir = args.checkpoint_dir if args.checkpoint_dir else args.output_dir
+    os.makedirs(checkpoint_dir, exist_ok=True)
 
     ### sanity checks 
     assert torch.cuda.is_available(), \
@@ -135,6 +141,11 @@ def main():
         ignore_mismatched_sizes=True,
     )
     
+    # Move model to GPU before applying adapters
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model.to(device)
+    logger.info(f"Model moved to device: {device}")
+    
     # Apply adapter if specified
     if args.adapter != "none":
         logger.info(f"Applying adapter: {args.adapter}")
@@ -154,7 +165,7 @@ def main():
     
     # here lies most finetuning decicions!!
     training_args = TrainingArguments(
-        output_dir=args.output_dir,
+        output_dir=checkpoint_dir,
         num_train_epochs=args.num_train_epochs,
         per_device_train_batch_size=args.per_device_train_batch_size,
         # use twice as many eval batch size to speed up evaluation (no backprop, so less memory needed)
@@ -213,8 +224,8 @@ def main():
     if args.do_train:
         logger.info("Starting training")
         trainer.train()
-        trainer.save_model(os.path.join(args.output_dir, "final_model"))
-        tokenizer.save_pretrained(os.path.join(args.output_dir, "final_model"))
+        trainer.save_model(os.path.join(checkpoint_dir, "final_model"))
+        tokenizer.save_pretrained(os.path.join(checkpoint_dir, "final_model"))
     # ── Eval ──────────────────────────────────────────────────────────────────
     if args.do_eval:
         logger.info("Evaluating on validation set")

@@ -78,13 +78,40 @@ class AdapterBase(ABC):
         return sum(p.numel() for p in model.parameters())
     
     def log_param_stats(self, model: torch.nn.Module) -> None:
-        """Log training statistics: trainable vs total parameters."""
-        trainable = self.get_trainable_params(model)
-        total = self.get_total_params(model)
-        ratio = (trainable / total) * 100 if total > 0 else 0
-        
-        logger.info(f"[{self.adapter_name}] Trainable params: {trainable:,} / {total:,} ({ratio:.2f}%)")
-        logger.info(f"[{self.adapter_name}] Parameter reduction: {(total - trainable) / total * 100:.1f}%")
+            """Log training statistics: trainable vs total parameters."""
+            trainable = self.get_trainable_params(model)
+            total = self.get_total_params(model)
+            ratio = (trainable / total) * 100 if total > 0 else 0
+            
+            logger.info(f"[{self.adapter_name}] Trainable params: {trainable:,} / {total:,} ({ratio:.2f}%)")
+            logger.info(f"[{self.adapter_name}] Parameter reduction: {(total - trainable) / total * 100:.1f}%")
+
+            # --- Grouping Logic ---
+            from collections import defaultdict
+            grouped_params = defaultdict(list)
+
+            for name, param in model.named_parameters():
+                if param.requires_grad:
+                    # Clean the name to find the type of layer
+                    # E.g., 'roberta.encoder.layer.0.attention.self.query.lora_A.weight' 
+                    # becomes 'attention.self.query.lora_A.weight'
+                    parts = name.split(".")
+                    
+                    if "layer" in parts:
+                        # Strip out the specific layer number (e.g., ".0.", ".1.") to group them
+                        layer_idx = parts.index("layer")
+                        group_key = ".".join(parts[layer_idx + 2 :]) 
+                    else:
+                        # For embeddings, classifier heads, etc.
+                        group_key = ".".join(parts[-2:])
+                    
+                    grouped_params[group_key].append(param.numel())
+
+            logger.info(f"[{self.adapter_name}] Grouped Trainable Parameters Summary:")
+            for group_name, param_counts in sorted(grouped_params.items()):
+                total_group_params = sum(param_counts)
+                num_layers = len(param_counts)
+                logger.info(f"  -> {group_name} (Across {num_layers} layers) | Total Params: {total_group_params:,}")
     
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}(name={self.adapter_name})"

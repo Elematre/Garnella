@@ -13,6 +13,7 @@ Reference: https://arxiv.org/abs/2405.17604
 
 import logging
 from typing import Optional, Any, Dict
+from xml.parsers.expat import model
 
 import torch
 from peft import LoraConfig, get_peft_model
@@ -93,6 +94,11 @@ class XLMRobertaLoRA(AdapterBase):
         model = get_peft_model(model, lora_config)
         logger.info("Model wrapped with PEFT LoRA config")
         
+        # Always unfreeze the classifier when using PEFT for classification
+        for name, param in model.named_parameters():
+            if "classifier" in name:
+                param.requires_grad = True
+
         # Log final parameter statistics
         self.log_param_stats(model)
         
