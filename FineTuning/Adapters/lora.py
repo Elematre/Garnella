@@ -88,6 +88,7 @@ class XLMRobertaLoRA(AdapterBase):
             lora_dropout=config["lora_dropout"],
             bias=config["bias"],
             task_type=config["task_type"],
+            init_lora_weights="pissa_niter_4",  # Uses fast-SVD PiSSA initialization
         )
         
         # Wrap model with PEFT (uses random initialization by default)
