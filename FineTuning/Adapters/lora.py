@@ -38,9 +38,9 @@ class XLMRobertaLoRA(AdapterBase):
     
     # Default configuration inlined
     DEFAULT_CONFIG = {
-        "lora_rank": 16,
+        "lora_rank": 32,
         "target_modules": ["query", "key", "value", "dense"],
-        "lora_alpha": 16,
+        "lora_alpha": 32,
         "lora_dropout": 0.1,
         "bias": "none",
         "task_type": "SEQ_CLS",

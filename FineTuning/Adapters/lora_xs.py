@@ -25,9 +25,46 @@ from peft.tuners.lora import Linear as LoraLinear
 from transformers import PreTrainedModel
 
 from .base import AdapterBase
-from .utils.svd_init import get_frozen_ab_matrices, get_adaptive_frozen_ab_matrices
+from .utils.svd_init import (
+    get_frozen_ab_matrices_major,
+    get_frozen_ab_matrices_minor,
+    get_adaptive_frozen_ab_matrices_major,
+)
 
 logger = logging.getLogger(__name__)
+
+
+def _get_init_matrices(
+    weight: np.ndarray,
+    rank: int,
+    init_strategy: str,
+    device: str = "cpu",
+) -> Tuple[torch.Tensor, torch.Tensor, int]:
+    """Return frozen A/B matrices for the requested non-adaptive initialization strategy."""
+    strategy = init_strategy.strip().lower()
+
+    if strategy == "major":
+        A_tensor, B_tensor = get_frozen_ab_matrices_major(weight=weight, rank=rank, device=device)
+        return A_tensor, B_tensor, rank
+
+    if strategy == "minor":
+        A_tensor, B_tensor = get_frozen_ab_matrices_minor(weight=weight, rank=rank, device=device)
+        return A_tensor, B_tensor, rank
+
+    if strategy == "mixed":
+        major_rank = rank // 2
+        minor_rank = rank - major_rank
+
+        A_major, B_major = get_frozen_ab_matrices_major(weight=weight, rank=major_rank, device=device)
+        A_minor, B_minor = get_frozen_ab_matrices_minor(weight=weight, rank=minor_rank, device=device)
+
+        A_tensor = torch.cat([A_major, A_minor], dim=1)
+        B_tensor = torch.cat([B_major, B_minor], dim=0)
+        return A_tensor, B_tensor, rank
+
+    raise ValueError(
+        f"Unsupported initStrategy '{init_strategy}'. Expected one of: Major, Minor, Mixed."
+    )
 
 
 class LoraXSLinear(nn.Module):
@@ -47,6 +84,7 @@ class LoraXSLinear(nn.Module):
         self,
         lora_layer: LoraLinear,
         lora_rank: int,
+        init_strategy: str = "major",
         adaptive: bool = False,
         threshold: float = 0.90,
         min_rank: int = 2,
@@ -57,6 +95,7 @@ class LoraXSLinear(nn.Module):
         Args:
             lora_layer: The original PEFT LoRA layer to wrap
             lora_rank: Rank of the LoRA decomposition (used as max_rank if adaptive)
+            init_strategy: Major, Minor, or Mixed initialization for non-adaptive mode
             adaptive: Whether to use adaptive rank selection
             threshold: Cumulative singular value threshold for adaptive rank
             min_rank: Minimum rank for adaptive rank
@@ -82,14 +121,18 @@ class LoraXSLinear(nn.Module):
 
         # Resolve rank and get matrices — unified path
         if self.adaptive:
-            A_tensor, B_tensor, self.lora_rank = get_adaptive_frozen_ab_matrices(
+            A_tensor, B_tensor, self.lora_rank = get_adaptive_frozen_ab_matrices_major(
                 weight=base_weight, max_rank=lora_rank,
                 threshold=threshold, min_rank=min_rank
             )
-            self.scaling = 1
+            self.scaling = 1.0
         else:
-            A_tensor, B_tensor = get_frozen_ab_matrices(weight=base_weight, rank=lora_rank)
-            self.lora_rank = lora_rank
+            A_tensor, B_tensor, self.lora_rank = _get_init_matrices(
+                weight=base_weight,
+                rank=lora_rank,
+                init_strategy=init_strategy,
+                device="cpu",
+            )
             self.scaling = self.lora_alpha / self.lora_rank
 
         # Always resize and populate A/B weights with the actual SVD results
@@ -129,6 +172,7 @@ class LoraXSLinear(nn.Module):
         cls,
         lora_layer: LoraLinear,
         lora_rank: int,
+        init_strategy: str = "major",
         adaptive: bool = False,
         threshold: float = 0.90,
         min_rank: int = 2,
@@ -139,6 +183,7 @@ class LoraXSLinear(nn.Module):
         Args:
             lora_layer: The PEFT LoRA layer to wrap
             lora_rank: Rank of LoRA decomposition
+            init_strategy: Major, Minor, or Mixed initialization for non-adaptive mode
             adaptive: Whether to use adaptive rank selection
             threshold: Cumulative singular value threshold
             min_rank: Minimum rank for adaptive rank
@@ -146,12 +191,13 @@ class LoraXSLinear(nn.Module):
         Returns:
             LoraXSLinear wrapper instance
         """
-        return cls(lora_layer, lora_rank, adaptive, threshold, min_rank)
+        return cls(lora_layer, lora_rank, init_strategy, adaptive, threshold, min_rank)
 
 
 def _replace_with_lora_xs(
     model: PreTrainedModel,
     lora_rank: int,
+    init_strategy: str = "major",
     adaptive: bool = False,
     threshold: float = 0.90,
     min_rank: int = 2,
@@ -185,6 +231,7 @@ def _replace_with_lora_xs(
         xs_layer = LoraXSLinear.from_lora_linear(
             child_module,
             lora_rank,
+            init_strategy=init_strategy,
             adaptive=adaptive,
             threshold=threshold,
             min_rank=min_rank,
@@ -216,6 +263,7 @@ class XLMRobertaLoRAXS(AdapterBase):
         "lora_rank": 32,
         "target_modules": ["query", "key", "value", "dense"],
         "adaptiveRank": False,
+        "initStrategy": "Major",
         "criterionThreshold": 0.90,
         "minRank": 2,
         "maxRank": 128,
@@ -284,12 +332,15 @@ class XLMRobertaLoRAXS(AdapterBase):
         threshold = self._get_config_value("criterionThreshold", 0.90)
         min_rank = self._get_config_value("minRank", 2)
         base_lora_rank = self._get_config_value("lora_rank", 16)
+        init_strategy = str(self._get_config_value("initStrategy", "Major")).strip().lower()
         
         if adaptive_rank:
             lora_rank = self._get_config_value("maxRank", 128)
             logger.info(f"Adaptive rank enabled: Threshold={threshold}, min={min_rank}, max={lora_rank}")
+            logger.info("initStrategy is ignored when adaptiveRank=True")
         else:
             lora_rank = base_lora_rank
+            logger.info(f"Using initStrategy={init_strategy}")
 
         target_modules = self._get_config_value("target_modules", ["query", "key", "value", "dense"])
         peft_config = self._get_config_value("peft", {})
@@ -314,6 +365,7 @@ class XLMRobertaLoRAXS(AdapterBase):
         replaced_count, ranks = _replace_with_lora_xs(
             model,
             lora_rank,
+            init_strategy=init_strategy,
             adaptive=adaptive_rank,
             threshold=threshold,
             min_rank=min_rank,

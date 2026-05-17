@@ -1,5 +1,6 @@
 lora_rank: 32
-adaptiveRank: true
+adaptiveRank: false
+initStrategy: minor
 criterionThreshold: 0.8
 minRank: 2
 maxRank: 64

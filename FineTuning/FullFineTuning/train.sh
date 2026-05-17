@@ -50,7 +50,7 @@ echo "Checkpoint directory: $CHECKPOINT_DIR"
 echo "Predictions directory: $OUTPUT_ROOT/$RUN_ID"
 # Define model and adapter to use
 MODEL_PATH="xlm-roberta-large"
-ADAPTER_TYPE="lora-xs"
+ADAPTER_TYPE="lora"
 
 # Extract model size from model path (e.g., "base" from "xlm-roberta-base")
 MODEL_SIZE="${MODEL_PATH##*-}"

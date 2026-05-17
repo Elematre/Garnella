@@ -127,7 +127,7 @@ def compute_svd(
     return U, S, Vt
 
 
-def get_frozen_ab_matrices(
+def get_frozen_ab_matrices_major(
     weight: np.ndarray,
     rank: int,
     n_iter: int = 30,
@@ -165,7 +165,85 @@ def get_frozen_ab_matrices(
     return A_tensor, B_tensor
 
 
-def get_adaptive_frozen_ab_matrices(
+def get_frozen_ab_matrices_minor(
+    weight: np.ndarray,
+    rank: int,
+    n_iter: int = 30,
+    use_cache: bool = True,
+    device: str = "cpu",
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    """
+    Extract frozen A and B matrices from the MINOR singular components of W.
+    
+    Mirrors get_frozen_ab_matrices exactly but uses the smallest singular values/vectors
+    instead of the largest — following MiLoRA's insight that minor components correspond
+    to less-optimized subspace, reducing interference with pretrained knowledge.
+
+    Output convention is identical to get_frozen_ab_matrices:
+        A: (out_features, rank) — scaled by singular values, maps to lora_B
+        B: (rank, in_features) — unscaled right singular vectors, maps to lora_A
+    """
+    weight_clean = weight.astype(np.float32)
+
+    # Check cache
+    if use_cache:
+        weight_hash = _get_weight_hash(weight_clean)
+        cache_path = _get_cache_path(f"{weight_hash}_minor", rank, n_iter)
+        if cache_path.exists():
+            logger.info(f"Loading cached minor SVD from {cache_path}")
+            with open(cache_path, "rb") as f:
+                cached = pickle.load(f)
+            U, S, Vt = cached["U"], cached["S"], cached["Vt"]
+        else:
+            U, S, Vt = _compute_minor_svd(weight_clean, rank)
+            with open(cache_path, "wb") as f:
+                pickle.dump({"U": U, "S": S, "Vt": Vt}, f)
+            logger.info(f"Cached minor SVD to {cache_path}")
+    else:
+        U, S, Vt = _compute_minor_svd(weight_clean, rank)
+
+    # Match major convention: A = U * S (scaled), B = Vt (unscaled)
+    A = (U * S[np.newaxis, :]).astype(weight.dtype)
+    B = Vt.astype(weight.dtype)
+
+    A_tensor = torch.tensor(A, dtype=torch.float32).to(device)
+    B_tensor = torch.tensor(B, dtype=torch.float32).to(device)
+
+    return A_tensor, B_tensor
+
+
+def _compute_minor_svd(
+    weight: np.ndarray,
+    rank: int,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """
+    Compute the minor (smallest magnitude) singular components of a weight matrix.
+    Uses scipy.sparse.linalg.svds with which='SM' for efficiency.
+    Falls back to full SVD and tail-slicing if svds fails.
+    """
+    from scipy.sparse.linalg import svds
+
+    try:
+        # 'SM' = smallest magnitude — scipy uses shift-invert internally, fast
+        U, S, Vt = svds(weight, k=rank, which="SM")
+
+        # svds returns ascending order for SM — flip so smallest is index 0
+        # (mirrors descending convention of the major case)
+        U = np.flip(U, axis=1).copy()
+        S = np.flip(S).copy()
+        Vt = np.flip(Vt, axis=0).copy()
+
+    except Exception as e:
+        logger.warning(f"Minor svds failed: {e}, falling back to full SVD tail")
+        U_full, S_full, Vt_full = np.linalg.svd(weight, full_matrices=False)
+        # Take the tail (smallest) components
+        U = U_full[:, -rank:][:, ::-1].copy()
+        S = S_full[-rank:][::-1].copy()
+        Vt = Vt_full[-rank:, :][::-1, :].copy()
+
+    return U, S, Vt
+
+def get_adaptive_frozen_ab_matrices_major(
     weight: np.ndarray,
     max_rank: int,
     threshold: float = 0.90,
