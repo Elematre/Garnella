@@ -50,7 +50,7 @@ echo "Checkpoint directory: $CHECKPOINT_DIR"
 echo "Predictions directory: $OUTPUT_ROOT/$RUN_ID"
 # Define model and adapter to use
 MODEL_PATH="xlm-roberta-large"
-ADAPTER_TYPE="lora"
+ADAPTER_TYPE="lora-xs"
 
 # Extract model size from model path (e.g., "base" from "xlm-roberta-base")
 MODEL_SIZE="${MODEL_PATH##*-}"
@@ -59,7 +59,7 @@ MODEL_SIZE="${MODEL_PATH##*-}"
 RUN_NAME="xlmr_${MODEL_SIZE}_${ADAPTER_TYPE}_${RUN_ID}"
 
 # for adapter we use lr = 2e-4 otherwise 2e-5
-LEARNING_RATE="2e-5"
+LEARNING_RATE="2e-4"
 
 python train.py \
     --model_name_or_path    "$MODEL_PATH" \

@@ -48,12 +48,28 @@ class AdapterBase(ABC):
             return {}
         
         config_path = Path(self.config_path)
-        if not config_path.exists():
-            raise FileNotFoundError(f"Config file not found: {self.config_path}")
         
-        with open(config_path, 'r') as f:
-            config = yaml.safe_load(f)
-        logger.info(f"Loaded config for {self.adapter_name} from {self.config_path}")
+        # Check if file exists
+        if not config_path.exists():
+            raise FileNotFoundError(
+                f"Config file not found for {self.adapter_name}: {config_path.resolve()}. "
+                f"Checked path: {self.config_path}"
+            )
+        
+        # Try to load YAML with error handling
+        try:
+            with open(config_path, 'r') as f:
+                config = yaml.safe_load(f)
+        except yaml.YAMLError as e:
+            raise ValueError(
+                f"Failed to parse YAML config for {self.adapter_name} at {config_path.resolve()}: {e}"
+            )
+        except IOError as e:
+            raise IOError(
+                f"Failed to read config file for {self.adapter_name} at {config_path.resolve()}: {e}"
+            )
+        
+        logger.info(f"Loaded config for {self.adapter_name} from {config_path.resolve()}")
         return config or {}
     
     @abstractmethod
@@ -92,19 +108,27 @@ class AdapterBase(ABC):
 
             for name, param in model.named_parameters():
                 if param.requires_grad:
-                    # Clean the name to find the type of layer
-                    # E.g., 'roberta.encoder.layer.0.attention.self.query.lora_A.weight' 
-                    # becomes 'attention.self.query.lora_A.weight'
                     parts = name.split(".")
-                    
+
                     if "layer" in parts:
-                        # Strip out the specific layer number (e.g., ".0.", ".1.") to group them
+                        # Strip layer number, keep structural path
+                        # e.g., 'roberta.encoder.layer.0.attention.self.query.lora_A.weight'
+                        #     -> 'attention.self.query.lora_A.weight'
                         layer_idx = parts.index("layer")
-                        group_key = ".".join(parts[layer_idx + 2 :]) 
+                        group_key = ".".join(parts[layer_idx + 2:])
+
+                    elif any(keyword in parts for keyword in ("classifier", "pooler", "head")):
+                        # Keep full name for interpretability
+                        # e.g., 'base_model.model.classifier.modules_to_save.default.weight'
+                        #     -> 'classifier.modules_to_save.default.weight'
+                        anchor_keywords = ("classifier", "pooler", "head")
+                        anchor_idx = next(i for i, p in enumerate(parts) if p in anchor_keywords)
+                        group_key = ".".join(parts[anchor_idx:])
+
                     else:
-                        # For embeddings, classifier heads, etc.
+                        # Embeddings, norms, etc. — last 2 parts is fine
                         group_key = ".".join(parts[-2:])
-                    
+
                     grouped_params[group_key].append(param.numel())
 
             logger.info(f"[{self.adapter_name}] Grouped Trainable Parameters Summary:")

@@ -14,8 +14,9 @@ Reference: https://arxiv.org/abs/2405.17604
 """
 
 import logging
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List, Tuple
 import math
+import numpy as np
 
 import torch
 import torch.nn as nn
@@ -24,7 +25,7 @@ from peft.tuners.lora import Linear as LoraLinear
 from transformers import PreTrainedModel
 
 from .base import AdapterBase
-from .utils.svd_init import get_frozen_ab_matrices
+from .utils.svd_init import get_frozen_ab_matrices, get_adaptive_frozen_ab_matrices
 
 logger = logging.getLogger(__name__)
 
@@ -46,19 +47,23 @@ class LoraXSLinear(nn.Module):
         self,
         lora_layer: LoraLinear,
         lora_rank: int,
+        adaptive: bool = False,
+        threshold: float = 0.90,
+        min_rank: int = 2,
     ):
         """
         Initialize LoRA-XS wrapper.
         
         Args:
             lora_layer: The original PEFT LoRA layer to wrap
-            lora_rank: Rank of the LoRA decomposition
-            r_matrix_init: Initialization method for R matrix ("kaiming" or "normal")
-            r_matrix_std: Standard deviation for normal initialization
+            lora_rank: Rank of the LoRA decomposition (used as max_rank if adaptive)
+            adaptive: Whether to use adaptive rank selection
+            threshold: Cumulative singular value threshold for adaptive rank
+            min_rank: Minimum rank for adaptive rank
         """
         super().__init__()
         self.lora_layer = lora_layer
-        self.lora_rank = lora_rank
+        self.adaptive = adaptive
         
         # Extract A and B from the LoRA layer
         self.lora_A = lora_layer.lora_A["default"]
@@ -67,34 +72,41 @@ class LoraXSLinear(nn.Module):
         # Inject SVD-based initialization
         # weight is (out_features, in_features)
         base_weight = self.lora_layer.base_layer.weight.data.clone().detach().cpu().numpy()
-        A_tensor, B_tensor = get_frozen_ab_matrices(
-            weight=base_weight,
-            rank=lora_rank,
-            device="cpu"  # keep it simple, .to() handles the rest below
-        )
         
-        # A_tensor shape: (out_features, rank) => matches lora_B.weight (out_features, rank)
-        # B_tensor shape: (rank, in_features) => matches lora_A.weight (rank, in_features)
-        self.lora_A.weight.data.copy_(B_tensor.to(self.lora_A.weight.device))
-        self.lora_B.weight.data.copy_(A_tensor.to(self.lora_B.weight.device))
-        
+
+        # Get alpha and scale factor from original LoRA layer
+        if isinstance(lora_layer.lora_alpha, dict):
+            self.lora_alpha = lora_layer.lora_alpha.get("default", lora_rank) # peft original behavior uses max rank for default scaling
+        else:
+            self.lora_alpha = lora_layer.lora_alpha
+
+        # Resolve rank and get matrices — unified path
+        if self.adaptive:
+            A_tensor, B_tensor, self.lora_rank = get_adaptive_frozen_ab_matrices(
+                weight=base_weight, max_rank=lora_rank,
+                threshold=threshold, min_rank=min_rank
+            )
+            self.scaling = 1
+        else:
+            A_tensor, B_tensor = get_frozen_ab_matrices(weight=base_weight, rank=lora_rank)
+            self.lora_rank = lora_rank
+            self.scaling = self.lora_alpha / self.lora_rank
+
+        # Always resize and populate A/B weights with the actual SVD results
+        dev, dtype = self.lora_A.weight.device, self.lora_A.weight.dtype
+
+        self.lora_A.weight = nn.Parameter(B_tensor.to(device=dev, dtype=dtype))  # (k, in_features)
+        self.lora_B.weight = nn.Parameter(A_tensor.to(device=dev, dtype=dtype))  # (out_features, k)
+
+        self.lora_A.out_features = self.lora_rank
+        self.lora_B.in_features = self.lora_rank
         # Now freeze A and B
         self.lora_A.weight.requires_grad_(False)
         self.lora_B.weight.requires_grad_(False)
         
         # Create trainable R matrix (rank x rank) and initialize to zero!!!
-        # If we initialize to Identity, the adapter will output approx `W * x * scaling`
-        # and double the activations initially. Zero initialization is like standard LoRA.
-        r_matrix = nn.Parameter(torch.zeros(lora_rank, lora_rank, device=self.lora_B.weight.device))
+        r_matrix = nn.Parameter(torch.zeros(self.lora_rank, self.lora_rank, device=self.lora_B.weight.device))
         self.register_parameter("lora_r", r_matrix)
-        
-        # Get alpha and scale factor from original LoRA layer
-        if isinstance(lora_layer.lora_alpha, dict):
-            self.lora_alpha = lora_layer.lora_alpha.get("default", lora_rank)
-        else:
-            self.lora_alpha = lora_layer.lora_alpha
-
-        self.scaling = self.lora_alpha / lora_rank
         
         # Copy over other attributes for compatibility
         self.weight = lora_layer.weight  # Original weight reference
@@ -106,11 +118,6 @@ class LoraXSLinear(nn.Module):
         # 1. Compute the clean, frozen base model output directly
         result = self.lora_layer.base_layer(x)
         
-        # 2. Guard rail: bypass adapter tracking if disabled or merged
-        if self.lora_layer.disable_adapters or self.lora_layer.merged:
-            return result
-            
-        # 3. Apply the custom LoRA-XS pathway
         x_A = torch.nn.functional.linear(x, self.lora_A.weight)
         x_AR = torch.nn.functional.linear(x_A, self.lora_r)
         x_ARB = torch.nn.functional.linear(x_AR, self.lora_B.weight)
@@ -122,6 +129,9 @@ class LoraXSLinear(nn.Module):
         cls,
         lora_layer: LoraLinear,
         lora_rank: int,
+        adaptive: bool = False,
+        threshold: float = 0.90,
+        min_rank: int = 2,
     ) -> "LoraXSLinear":
         """
         Create LoRA-XS wrapper from a PEFT LoRA layer.
@@ -129,35 +139,35 @@ class LoraXSLinear(nn.Module):
         Args:
             lora_layer: The PEFT LoRA layer to wrap
             lora_rank: Rank of LoRA decomposition
-            r_matrix_init: Initialization for R matrix
-            r_matrix_std: Std dev for normal init
+            adaptive: Whether to use adaptive rank selection
+            threshold: Cumulative singular value threshold
+            min_rank: Minimum rank for adaptive rank
             
         Returns:
             LoraXSLinear wrapper instance
         """
-        return cls(lora_layer, lora_rank)
+        return cls(lora_layer, lora_rank, adaptive, threshold, min_rank)
 
 
 def _replace_with_lora_xs(
     model: PreTrainedModel,
     lora_rank: int,
-) -> int:
+    adaptive: bool = False,
+    threshold: float = 0.90,
+    min_rank: int = 2,
+) -> Tuple[int, List[int]]:
     """
     Replace PEFT LoRA layers with LoRA-XS wrappers.
     
     Traverses the model tree, finds LoRA linear layers, and wraps them
     with LoraXSLinear to inject trainable R matrices.
     
-    Args:
-        model: Model with PEFT LoRA applied
-        lora_rank: Rank of LoRA decomposition
-        r_matrix_init: Initialization method for R matrices
-        r_matrix_std: Std dev for normal initialization
-        
     Returns:
-        Number of LoRA layers replaced
+        replaced_count: Number of LoRA layers replaced
+        ranks: List of ranks chosen for each layer
     """
     replaced_count = 0
+    ranks = []
     
     # Traverse model to find and replace LoRA layers
     # Use list() to avoid modifying the module structure while iterating
@@ -175,14 +185,18 @@ def _replace_with_lora_xs(
         xs_layer = LoraXSLinear.from_lora_linear(
             child_module,
             lora_rank,
+            adaptive=adaptive,
+            threshold=threshold,
+            min_rank=min_rank,
         )
         
         # Replace the module in the parent
         setattr(parent_module, child_name, xs_layer)
         replaced_count += 1
-        logger.debug(f"Replaced LoRA layer: {child_name}")
+        ranks.append(xs_layer.lora_rank)
+        logger.debug(f"Replaced LoRA layer: {child_name} with rank {xs_layer.lora_rank}")
     
-    return replaced_count
+    return replaced_count, ranks
 
 
 class XLMRobertaLoRAXS(AdapterBase):
@@ -199,10 +213,14 @@ class XLMRobertaLoRAXS(AdapterBase):
     
     # Default configuration inlined
     DEFAULT_CONFIG = {
-        "lora_rank": 16,
+        "lora_rank": 32,
         "target_modules": ["query", "key", "value", "dense"],
+        "adaptiveRank": False,
+        "criterionThreshold": 0.90,
+        "minRank": 2,
+        "maxRank": 128,
         "peft": {
-            "lora_alpha": 16,
+            "lora_alpha": 32,
             "lora_dropout": 0.1,
             "bias": "none",
             "task_type": "SEQ_CLS",
@@ -214,12 +232,32 @@ class XLMRobertaLoRAXS(AdapterBase):
         Initialize LoRA-XS adapter.
         
         Args:
-            config_path: Path to lora_xs_config.yaml. If None, uses hardcoded defaults.
+            config_path: Path to lora_xs_config.yaml. If None, tries to load from 
+                         Adapters/config/lora_xs_config.yaml, otherwise uses hardcoded defaults.
         """
-        # Currenty we have no config file, so we just ignore it
+        # Try to load from default config location if not specified
+        if config_path is None:
+            from pathlib import Path
+            adapter_dir = Path(__file__).parent
+            default_config_path = adapter_dir / "config" / "lora_xs_config.yaml"
+            
+            if default_config_path.exists():
+                config_path = str(default_config_path)
+                logger.info(f"Found default config at {default_config_path}, using it")
+            else:
+                logger.debug(f"No config file at {default_config_path}, will use hardcoded defaults")
+        
         super().__init__(adapter_name="lora_xs", config_path=config_path)
+        
+        # Merge loaded config with defaults for any missing keys
         if not self.config:
+            logger.info("No config loaded, using hardcoded defaults")
             self.config = self.DEFAULT_CONFIG.copy()
+        else:
+            # Ensure all required keys exist by merging with defaults
+            merged_config = self.DEFAULT_CONFIG.copy()
+            merged_config.update(self.config)
+            self.config = merged_config
     
     def _get_config_value(self, key: str, default: Any = None) -> Any:
         """Safely get config value with fallback to default."""
@@ -242,7 +280,17 @@ class XLMRobertaLoRAXS(AdapterBase):
         """
         logger.info(f"Applying LoRA-XS to model: {model.__class__.__name__}")
 
-        lora_rank = self._get_config_value("lora_rank", 16)
+        adaptive_rank = self._get_config_value("adaptiveRank", False)
+        threshold = self._get_config_value("criterionThreshold", 0.90)
+        min_rank = self._get_config_value("minRank", 2)
+        base_lora_rank = self._get_config_value("lora_rank", 16)
+        
+        if adaptive_rank:
+            lora_rank = self._get_config_value("maxRank", 128)
+            logger.info(f"Adaptive rank enabled: Threshold={threshold}, min={min_rank}, max={lora_rank}")
+        else:
+            lora_rank = base_lora_rank
+
         target_modules = self._get_config_value("target_modules", ["query", "key", "value", "dense"])
         peft_config = self._get_config_value("peft", {})
         init_config = self._get_config_value("init", {})
@@ -260,29 +308,31 @@ class XLMRobertaLoRAXS(AdapterBase):
 
         model = get_peft_model(model, lora_config)
 
-        # Always unfreeze the classifier when using PEFT for classification
-        for name, param in model.named_parameters():
-            if "classifier" in name:
-                param.requires_grad = True 
-
         logger.info(f"Model wrapped with PEFT LoRA (rank={lora_rank})")
 
-        # Step 2: Replace PEFT LoRA layers with LoRA-XS wrappers
-        r_matrix_init = init_config.get("r_matrix_init", "kaiming")
-        r_matrix_std = init_config.get("r_matrix_std", 0.02)
         
-        replaced_count = _replace_with_lora_xs(
+        replaced_count, ranks = _replace_with_lora_xs(
             model,
             lora_rank,
-            r_matrix_init,
-            r_matrix_std,
+            adaptive=adaptive_rank,
+            threshold=threshold,
+            min_rank=min_rank,
         )
         
-        logger.info(
-            f"Injected {replaced_count} trainable R matrices "
-            f"({lora_rank}×{lora_rank} each, "
-            f"{replaced_count * lora_rank * lora_rank} total params)"
-        )
+        if adaptive_rank and ranks:
+            logger.info(
+                f"Adaptive Ranks Summary | Average: {np.mean(ranks):.1f}, "
+                f"Max: {np.max(ranks)}, Min: {np.min(ranks)}, Std: {np.std(ranks):.2f}"
+            )
+            
+            total_r_params = sum(r * r for r in ranks)
+            logger.info(f"Injected {replaced_count} trainable R matrices ({total_r_params} total params)")
+        else:
+            logger.info(
+                f"Injected {replaced_count} trainable R matrices "
+                f"({lora_rank}×{lora_rank} each, "
+                f"{replaced_count * lora_rank * lora_rank} total params)"
+            )
 
         # Step 3: Log final parameter statistics
         self.log_param_stats(model)

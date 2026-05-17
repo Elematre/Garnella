@@ -165,6 +165,58 @@ def get_frozen_ab_matrices(
     return A_tensor, B_tensor
 
 
+def get_adaptive_frozen_ab_matrices(
+    weight: np.ndarray,
+    max_rank: int,
+    threshold: float = 0.90,
+    min_rank: int = 2,
+    n_iter: int = 30,
+    use_cache: bool = True,
+    device: str = "cpu",
+) -> Tuple[torch.Tensor, torch.Tensor, int]:
+    """
+    Extract frozen A and B matrices using an adaptively chosen rank.
+    
+    Computes SVD with `max_rank`, then dynamically selects rank `k` based on
+    the cumulative singular value threshold.
+    
+    Returns:
+        (A, B, k) where A and B are sized according to the selected rank k.
+    """
+    U, S, Vt = compute_svd(weight, max_rank, n_iter, use_cache, device="cpu")
+    
+    # Convert singular values to a PyTorch tensor
+    S_tensor = torch.tensor(S)
+    
+    # 1. Square the singular values to get energy / variance
+    S_squared = S_tensor ** 2
+    
+    # 2. Calculate cumulative energy ratio
+    # (Scipy's 'SM' returns values sorted from smallest to largest, 
+    # so cumulative sum naturally accumulates minor component energy first)
+    cumulative_energy = torch.cumsum(S_squared, dim=0) / S_squared.sum()
+    
+    # 3. Find the rank k that captures the target threshold of minor energy
+    k = (cumulative_energy < threshold).sum().item() + 1
+    
+    # 4. Enforce your hard minimum and maximum boundary constraints
+    k = max(min_rank, min(k, max_rank))
+    
+    # Truncate U, S, Vt to k
+    U_k = U[:, :k]
+    S_k = S[:k]
+    Vt_k = Vt[:k, :]
+    
+    # Compute A and B based on k
+    A = (U_k * S_k[np.newaxis, :]).astype(weight.dtype)
+    B = Vt_k.astype(weight.dtype)
+    
+    A_tensor = torch.tensor(A, dtype=torch.float32).to(device)
+    B_tensor = torch.tensor(B, dtype=torch.float32).to(device)
+    
+    return A_tensor, B_tensor, k
+
+
 def verify_svd_reconstruction(
     weight: np.ndarray,
     U: np.ndarray,
